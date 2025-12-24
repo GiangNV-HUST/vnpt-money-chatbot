@@ -54,9 +54,11 @@ Archive_Old_Files/
 .DS_Store
 Thumbs.db
 
-# Data files (nếu quá lớn)
-# data/
-# Uncomment nếu data quá lớn
+# Data files (bảo mật - không push lên Git)
+data/
+*.xlsx
+*.json
+!GraphRAG/data/conditional_cases_analysis.json
 
 # Neo4j exports (có thể regenerate)
 GraphRAG/database_exports/
