@@ -1,0 +1,90 @@
+"""
+Configuration file for GraphRAG Chatbot
+"""
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Project paths
+PROJECT_ROOT = Path(__file__).parent
+DATA_DIR = PROJECT_ROOT / "data"
+MODELS_DIR = PROJECT_ROOT / "models"
+LOGS_DIR = PROJECT_ROOT / "logs"
+
+# Data paths
+RAW_DATA_PATH = PROJECT_ROOT.parent / "data" / "paraphrase_documents.json"
+GRAPH_DB_PATH = DATA_DIR / "knowledge_graph.db"
+
+# API Keys (set in .env file)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# LLM Configuration
+LLM_PROVIDER = "openai"
+# Supported models: "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"
+LLM_MODEL = "gpt-4o-mini"  # Recommended: gpt-4o-mini (fast, cheap, good quality)
+LLM_TEMPERATURE = 0.1  # Low temperature for consistent extraction
+LLM_MAX_TOKENS = 4096  # Increased to allow for longer, detailed responses
+
+# Embedding Configuration
+# Using custom finetuned model for VNPT Money domain
+EMBEDDING_MODEL = str(PROJECT_ROOT.parent / "models" / "vnpt-sbert-mnrl")
+EMBEDDING_DIMENSION = 384
+
+# Graph Database Configuration
+GRAPH_DB_TYPE = "neo4j"  # Options: "networkx", "neo4j"
+
+# Neo4j Configuration
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j")
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "vnptmoney")  # Database name
+USE_NEO4J = True  # Set to True to use Neo4j (now default)
+
+# Graph Configuration
+MAX_GRAPH_DEPTH = 3  # Maximum depth for graph traversal
+MIN_SIMILARITY_SCORE = 0.7  # Minimum similarity for RELATED_TO edges
+MAX_RELATED_QUESTIONS = 5  # Maximum related questions per node
+
+# RAG Configuration
+TOP_K_RETRIEVAL = 5  # Number of relevant nodes to retrieve (default for UI)
+CONTEXT_WINDOW = 3  # Number of hops in graph traversal
+ENABLE_RERANKING = True  # Enable result reranking
+
+# Query Classification
+SIMPLE_QUERY_THRESHOLD = 0.8  # Confidence threshold for simple queries
+ENABLE_HYBRID_MODE = True  # Enable Vector + Graph hybrid
+
+# Hybrid Search Weights (must sum to 1.0)
+HYBRID_WEIGHT_ENTITY_GRAPH = 0.5  # Entity-based graph search (50%)
+HYBRID_WEIGHT_SEMANTIC = 0.5      # Semantic similarity search (50% - equal weight to handle missing graph relationships)
+HYBRID_WEIGHT_KEYWORD = 0.0       # Keyword search (disabled in hybrid mode)
+
+# Vector Store Configuration (for hybrid mode)
+VECTOR_STORE_TYPE = "chromadb"  # Options: "chromadb", "faiss"
+CHROMA_PERSIST_DIR = DATA_DIR / "chroma_db"
+
+# Logging
+LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+LOG_FILE = LOGS_DIR / "chatbot.log"
+
+# Performance
+CACHE_ENABLED = True
+CACHE_SIZE = 100  # Number of queries to cache
+
+# Entity Extraction
+ENTITY_EXTRACTION_METHOD = "llm"  # Options: "rule_based", "llm", "hybrid"
+MIN_ENTITY_CONFIDENCE = 0.6
+USE_LLM_EXTRACTION = True  # Use LLM for entity and relationship extraction
+
+# Response Generation
+RESPONSE_LANGUAGE = "vi"  # Vietnamese
+INCLUDE_SOURCES = True  # Include source references in response
+MAX_RESPONSE_LENGTH = 500  # Maximum characters in response
+
+# Create directories if they don't exist
+DATA_DIR.mkdir(exist_ok=True)
+MODELS_DIR.mkdir(exist_ok=True)
+LOGS_DIR.mkdir(exist_ok=True)

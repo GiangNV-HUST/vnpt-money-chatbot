@@ -1,0 +1,32 @@
+    rb cữ# Core dependencies
+networkx==3.2.1  # Keep for backward compatibility
+python-dotenv==1.0.0
+
+# Graph Database - Neo4j
+neo4j==5.14.1
+
+# LLM - OpenAI & Google Gemini
+openai>=1.0.0
+google-generativeai==0.8.3
+
+# NLP & Embeddings
+sentence-transformers==2.2.2
+transformers==4.36.0
+
+# Vector database (for hybrid approach - optional)
+chromadb==0.4.22
+faiss-cpu==1.7.4
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.2
+tqdm==4.66.1
+
+# Graph visualization (optional)
+matplotlib==3.8.2
+pyvis==0.3.2
+
+# Utilities
+python-Levenshtein==0.23.0
+fuzzywuzzy==0.18.0
+pydantic==2.5.3
