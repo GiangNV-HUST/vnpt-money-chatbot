@@ -1,6 +1,7 @@
 """
 Conversation Context Manager for Multi-turn Dialogues
 Tracks conversation state, detects contextual references, and manages step-by-step interactions
+NOW WITH LANGCHAIN MEMORY INTEGRATION!
 """
 
 import logging
@@ -10,6 +11,21 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# LangChain imports (after logger is defined)
+# Note: In LangChain v1.2+, memory classes are deprecated
+# We'll use a simpler in-memory approach with LangChain message history
+try:
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+    LANGCHAIN_AVAILABLE = True
+    logger.info("LangChain available - will use ChatMessageHistory for conversation tracking")
+except ImportError as e:
+    LANGCHAIN_AVAILABLE = False
+    logger.warning(f"LangChain not available: {e}. Install with: pip install langchain langchain-openai langchain-community")
+
+import config
 
 
 class ConversationContextManager:
@@ -23,12 +39,13 @@ class ConversationContextManager:
     - Identifies step-based interactions
     """
 
-    def __init__(self, max_history: int = 5):
+    def __init__(self, max_history: int = 5, enable_langchain_memory: bool = None):
         """
         Initialize ConversationContextManager
 
         Args:
             max_history: Maximum number of turns to keep in history
+            enable_langchain_memory: Enable LangChain memory (default: from config)
         """
         self.max_history = max_history
         self.conversation_history = []
@@ -42,14 +59,75 @@ class ConversationContextManager:
             "last_answer": None
         }
 
+        # Initialize LangChain Memory
+        self.enable_langchain_memory = enable_langchain_memory if enable_langchain_memory is not None else getattr(config, 'ENABLE_LANGCHAIN_MEMORY', False)
+        self.langchain_memory = None
+
+        if self.enable_langchain_memory and LANGCHAIN_AVAILABLE:
+            self._initialize_langchain_memory()
+        elif self.enable_langchain_memory and not LANGCHAIN_AVAILABLE:
+            logger.warning("LangChain memory requested but not available. Falling back to basic memory.")
+            self.enable_langchain_memory = False
+
+    def _initialize_langchain_memory(self):
+        """
+        Initialize LangChain message history and LLM for summarization
+
+        In LangChain v1.2+, we use ChatMessageHistory + custom summarization logic
+        """
+        try:
+            # Initialize LLM for summarization
+            self.llm = ChatOpenAI(
+                model=getattr(config, 'LLM_MODEL', 'gpt-4o-mini'),
+                temperature=0.0,  # Low temperature for consistent summaries
+                api_key=getattr(config, 'OPENAI_API_KEY', '')
+            )
+
+            # Initialize message history
+            self.langchain_memory = ChatMessageHistory()
+
+            # Configuration
+            self.memory_type = getattr(config, 'MEMORY_TYPE', 'summary_buffer')
+            self.max_token_limit = getattr(config, 'MEMORY_MAX_TOKEN_LIMIT', 2000)
+            self.conversation_summary = ""  # Store summary of old messages
+            self.summary_message_count = 0  # Track how many messages have been summarized
+
+            logger.info(f"Initialized LangChain ChatMessageHistory with {self.memory_type} mode (max_token_limit={self.max_token_limit})")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize LangChain memory: {e}")
+            logger.warning("Falling back to basic memory")
+            self.enable_langchain_memory = False
+            self.langchain_memory = None
+            self.llm = None
+
     def add_turn(self, user_query: str, bot_response: Dict):
         """
-        Add a conversation turn to history
+        Add a conversation turn to history (both basic and LangChain memory)
 
         Args:
             user_query: User's query
             bot_response: Bot's response (RAG result)
         """
+        # Extract bot's answer text
+        bot_answer = bot_response.get("answer", "")
+
+        # Add to LangChain memory if enabled
+        if self.enable_langchain_memory and self.langchain_memory:
+            try:
+                # Add messages to history
+                self.langchain_memory.add_user_message(user_query)
+                self.langchain_memory.add_ai_message(bot_answer)
+                logger.debug("Added turn to LangChain memory")
+
+                # Check if we need to summarize (summary_buffer mode)
+                if self.memory_type == "summary_buffer":
+                    self._maybe_summarize_old_messages()
+
+            except Exception as e:
+                logger.error(f"Failed to save to LangChain memory: {e}")
+
+        # Add to basic history (for backward compatibility)
         turn = {
             "timestamp": datetime.now(),
             "user_query": user_query,
@@ -67,46 +145,184 @@ class ConversationContextManager:
         # Update current context
         self._update_context(user_query, bot_response)
 
+    def _maybe_summarize_old_messages(self):
+        """
+        Summarize old messages if conversation exceeds token limit
+        (Implements ConversationSummaryBufferMemory behavior)
+        """
+        try:
+            messages = self.langchain_memory.messages
+
+            # Rough token count estimation (1 token ~ 4 characters for Vietnamese)
+            total_chars = sum(len(msg.content) for msg in messages)
+            estimated_tokens = total_chars // 4
+
+            # If under limit, no need to summarize
+            if estimated_tokens <= self.max_token_limit:
+                return
+
+            # Keep last N messages, summarize the rest
+            # Keep at least 2 recent exchanges (4 messages)
+            keep_recent = min(4, len(messages))
+            messages_to_summarize = messages[self.summary_message_count:-keep_recent] if len(messages) > keep_recent else []
+
+            if messages_to_summarize:
+                logger.info(f"Summarizing {len(messages_to_summarize)} old messages to save tokens...")
+
+                # Build conversation text
+                conv_text = "\n".join([
+                    f"{'Khách hàng' if isinstance(msg, HumanMessage) else 'VNPT Assistant'}: {msg.content}"
+                    for msg in messages_to_summarize
+                ])
+
+                # Ask LLM to summarize
+                summary_prompt = f"""Hãy tóm tắt cuộc hội thoại sau đây một cách ngắn gọn, giữ lại các thông tin quan trọng:
+
+{conv_text}
+
+Tóm tắt (bằng tiếng Việt, 2-3 câu):"""
+
+                response = self.llm.invoke(summary_prompt)
+                new_summary = response.content.strip()
+
+                # Combine with existing summary if any
+                if self.conversation_summary:
+                    self.conversation_summary = f"{self.conversation_summary}\n\n{new_summary}"
+                else:
+                    self.conversation_summary = new_summary
+
+                # Track how many messages we've summarized
+                self.summary_message_count = len(messages) - keep_recent
+
+                logger.info(f"Summary updated. Total summarized messages: {self.summary_message_count}")
+                logger.debug(f"Summary: {self.conversation_summary[:100]}...")
+
+        except Exception as e:
+            logger.error(f"Failed to summarize old messages: {e}")
+
     def _update_context(self, user_query: str, bot_response: Dict):
         """Update current context based on latest turn"""
-        # Update entities
+        # Update entities (MERGE instead of overwrite to preserve context)
         if bot_response.get("related_entities"):
-            self.current_context["entities"] = bot_response["related_entities"]
+            # CRITICAL FIX: Merge new entities with existing ones instead of overwriting
+            # This preserves topic and other entities from previous turns
+            new_entities = bot_response["related_entities"]
+            for key, value in new_entities.items():
+                if value:  # Only update if new value is not empty
+                    self.current_context["entities"][key] = value
 
-        # Update topic
+        # Update topic (only if present in new response, otherwise keep existing)
         topics = bot_response.get("related_entities", {}).get("topics", [])
         if topics:
             self.current_context["topic"] = topics[0]
+        # CRITICAL: If no topics in response, keep existing topic (don't reset to None)
 
         # Update steps from answer
         answer = bot_response.get("answer", "")
         steps = self._extract_steps_from_answer(answer)
-        if steps:
+        # CRITICAL: Only update all_steps if this is NOT a continuation response
+        # For continuation, we want to keep the original all_steps from the initial answer
+        if steps and not bot_response.get("is_continuation"):
             self.current_context["all_steps"] = steps
+            logger.info(f"Updated all_steps with {len(steps)} steps from new answer")
+        elif steps and bot_response.get("is_continuation"):
+            logger.info(f"Skipping all_steps update for continuation response (keeping {len(self.current_context.get('all_steps', []))} original steps)")
 
         # CRITICAL FIX: Update current_step based on bot response
-        # If this is a step continuation response, track the step we just showed
+        # Track the LAST step we showed to the user (for "tiếp tục" queries)
         if bot_response.get("is_continuation"):
-            completed_step = bot_response.get("completed_step")
-            if completed_step:
-                self.current_context["current_step"] = completed_step
-                logger.info(f"Updated current_step to {completed_step} (from continuation response)")
-        elif steps:
-            # If bot just provided new steps, track the highest step number shown
-            max_step = max([s["step_number"] for s in steps])
-            self.current_context["current_step"] = max_step
-            logger.info(f"Updated current_step to {max_step} (highest step in new answer)")
+            # For continuation, track the last step we just showed
+            next_steps = bot_response.get("next_steps", [])
+            if next_steps:
+                # Get the highest step number from next_steps we just showed
+                logger.debug(f"next_steps: {next_steps}")
+                max_shown_step = max([s.get("number", 0) for s in next_steps])
+                self.current_context["current_step"] = max_shown_step
+                logger.info(f"Updated current_step to {max_shown_step} (last step shown in continuation)")
+        # IMPORTANT: Do NOT update current_step for initial answers (when showing all steps)
+        # Only update when it's a continuation - otherwise user hasn't completed any steps yet
 
         # Update last FAQ and answer
         self.current_context["last_faq_id"] = bot_response.get("all_results", [{}])[0].get("question_id") if bot_response.get("all_results") else None
         self.current_context["last_answer"] = answer
+
+    def _is_final_completion_step(self, step_text: str) -> bool:
+        """
+        Check if a step is a final completion/result step (not an action step)
+
+        Args:
+            step_text: The step text to check
+
+        Returns:
+            True if this is a completion step, False if it's an action step
+        """
+        step_lower = step_text.lower()
+
+        # STRONG completion keywords - if step starts with these, it's definitely completion
+        strong_completion_keywords = [
+            "màn hình xác nhận",
+            "xác nhận thành công",
+            "giao dịch thành công",
+            "hoàn tất",
+            "hoàn thành",
+            "kết thúc",
+            "completed",
+            "success",
+            "finished",
+        ]
+
+        # Check if step starts with strong completion keywords
+        for keyword in strong_completion_keywords:
+            if step_lower.startswith(keyword):
+                return True
+
+        # Action verbs that indicate this is an action step
+        action_verbs = [
+            "nhập", "chọn", "ấn", "bấm", "click", "tại", "vào",
+            "kiểm tra", "đợi", "chờ", "nhấn",
+            "enter", "select", "click", "tap", "check"
+        ]
+
+        has_action = any(verb in step_lower for verb in action_verbs)
+
+        # CRITICAL: If step contains "xác nhận" as verb (action), it's NOT completion
+        # e.g., "Xác nhận giao dịch và ấn Chuyển tiền" is ACTION
+        # e.g., "Màn hình Xác nhận giao dịch và nhấn Rút tiền" is ACTION
+        # but "Màn hình xác nhận thành công" is COMPLETION
+        if "xác nhận giao dịch" in step_lower or "xác nhận và" in step_lower:
+            has_action = True
+
+        # EARLY CHECK: If step mentions a screen/page but then has action verbs, it's ACTION
+        # e.g., "Màn hình X và nhấn Y" is ACTION, not COMPLETION
+        # This must be checked BEFORE weak completion keywords
+        if step_lower.startswith("màn hình") and has_action:
+            return False  # Definitely an action step
+
+        # WEAK completion keywords - need to check for absence of action verbs
+        weak_completion_keywords = [
+            "thành công",
+            "sẽ được xử lý",
+            "sẽ nhận được",
+            "nhận được kết quả",
+            "được xử lý",
+            "kết quả trên màn hình",
+        ]
+
+        # Check if step contains weak completion keywords
+        has_weak_completion = any(keyword in step_lower for keyword in weak_completion_keywords)
+
+        # If has weak completion keywords but NO action verbs, it's a completion step
+        if has_weak_completion and not has_action:
+            return True
+
+        return False
 
     def _extract_steps_from_answer(self, answer: str) -> List[Dict]:
         """
         Extract steps from answer text
 
         Returns:
-            List of {step_number, step_text, completed}
+            List of {step_number, step_text, is_completion_step, completed}
         """
         steps = []
 
@@ -142,12 +358,19 @@ class ConversationContextManager:
                         title = step_text
                         step_text_full = step_text
 
+                    # Check if this is a completion step (result, not action)
+                    is_completion = self._is_final_completion_step(title)
+
                     steps.append({
                         "step_number": step_num,
                         "step_text": step_text_full,
                         "step_title": title,
+                        "is_completion_step": is_completion,
                         "completed": False
                     })
+
+                    if is_completion:
+                        logger.info(f"   Step {step_num} marked as COMPLETION step: {title[:50]}...")
 
                 logger.info(f"Extracted {len(steps)} steps using pattern: {pattern[:30]}...")
                 break  # Use first matching pattern
@@ -340,6 +563,10 @@ class ConversationContextManager:
             r'sau\s+khi\s+(.+?)(hoàn\s+thành|xong|làm\s+xong)',
             r'(tiếp\s+theo|bước\s+tiếp\s+theo|sau\s+đó)',
 
+            # CRITICAL: "tiếp tục" - very common continuation signal
+            r'^tiếp\s+tục$',  # Match exact "tiếp tục" query
+            r'(^|\s)(tiếp\s+tục)(\s|$)',  # Match "tiếp tục" with word boundaries
+
             # CRITICAL: "rồi thì làm gì", "thì làm gì tiếp theo" - strong continuation signals
             r'rồi\s+(thì\s+)?(làm\s+gì|phải\s+làm\s+gì|làm\s+sao)',
             r'(thì|rồi)\s+(làm\s+gì|phải\s+làm\s+gì)\s+(tiếp\s+theo|nữa)',
@@ -452,28 +679,59 @@ class ConversationContextManager:
             if context["completed_step"]:
                 # User explicitly mentioned a step number (e.g., "sau khi hoàn thành 2 bước đầu")
                 context["next_step"] = context["completed_step"] + 1
-            elif context["all_steps"]:
-                # Check if user mentioned a status result - this implies they completed step 1
+            else:
+                # PRIORITY 1: Check if user mentioned a status result
                 status_result = self._extract_status_from_query(user_query)
-                if status_result:
+                if status_result and context["all_steps"]:
                     context["completed_step"] = 1
                     context["status_result"] = status_result
                     # Find which step corresponds to this status
                     context["next_step"] = self._find_step_for_status(status_result, context["all_steps"])
                     logger.info(f"   Detected status: {status_result}, jumping to step {context['next_step']}")
                 else:
-                    # CRITICAL FIX: Use current_step from context instead of defaulting to 1
-                    # This handles cases like "tiếp theo" where user doesn't mention a step number
+                    # PRIORITY 2: Use current_step from context (for "tiếp tục" queries)
+                    # This handles cases where user doesn't mention a step number
                     current_step = self.current_context.get("current_step")
                     if current_step:
                         context["completed_step"] = current_step
-                        context["next_step"] = current_step + 1
-                        logger.info(f"   Using tracked current_step: {current_step}, next_step: {current_step + 1}")
+                        # CRITICAL: Check if we're at the last step (don't increment beyond total)
+                        all_steps = context.get("all_steps", [])
+                        total_steps = len(all_steps) if all_steps else 999  # Use high number if unknown
+
+                        if current_step >= total_steps:
+                            # Already at or beyond last step - keep as is
+                            context["next_step"] = current_step + 1  # Will be handled as completion by engine
+                            logger.info(f"   At last step: current_step={current_step}, total={total_steps}, next_step={current_step + 1} (for completion detection)")
+                        else:
+                            context["next_step"] = current_step + 1
+                            logger.info(f"   Using tracked current_step: {current_step}, next_step: {current_step + 1}")
                     else:
                         # Fallback: If no current_step tracked, assume user completed step 1
                         context["completed_step"] = 1
                         context["next_step"] = 2
                         logger.info(f"   No current_step tracked, defaulting to step 1")
+
+            # DISABLED: Keyword-based completion detection is UNRELIABLE
+            # Let RAG engine use graph data (total_steps_in_process) for accurate completion detection
+            #
+            # REASON: Keywords like "sẽ được xử lý", "nhận được kết quả" appear in MIDDLE steps too!
+            # Example: "Rút tiền" step 5: "Giao dịch của bạn sẽ được xử lý..." <- NOT completion!
+            # The LAST step is determined by graph data, not keywords.
+            #
+            # if context["all_steps"] and context["next_step"]:
+            #     logger.info(f"   Checking if step {context['next_step']} is completion step...")
+            #     for step in context["all_steps"]:
+            #         if step["step_number"] == context["next_step"]:
+            #             is_completion = step.get("is_completion_step", False)
+            #             logger.info(f"   Found step {context['next_step']}, is_completion_step={is_completion}")
+            #             if is_completion:
+            #                 logger.info(f"   ✅ Next step {context['next_step']} is a COMPLETION step, marking as finished")
+            #                 context["all_steps_completed"] = True
+            #             break
+            #     else:
+            #         logger.info(f"   ⚠️  Step {context['next_step']} not found in all_steps")
+
+            logger.info(f"   ⚠️  Keyword-based completion detection DISABLED (use graph data instead)")
 
             logger.info(f"   Completed step: {context['completed_step']}, Next step: {context['next_step']}")
 
@@ -594,8 +852,73 @@ class ConversationContextManager:
 
         return enhanced_query, continuation_context
 
+    def get_memory_summary(self) -> Optional[str]:
+        """
+        Get conversation summary from LangChain memory
+
+        Returns:
+            Summary string or None if not using LangChain memory
+        """
+        if not self.enable_langchain_memory or not self.langchain_memory:
+            return None
+
+        try:
+            # Return the summary if available
+            if self.conversation_summary:
+                return self.conversation_summary
+
+            # Otherwise, return recent messages as string
+            messages = self.langchain_memory.messages
+            if messages:
+                return "\n".join([
+                    f"{'Khách hàng' if isinstance(msg, HumanMessage) else 'VNPT Assistant'}: {msg.content}"
+                    for msg in messages
+                ])
+
+            return "Chưa có cuộc hội thoại"
+
+        except Exception as e:
+            logger.error(f"Failed to get memory summary: {e}")
+            return None
+
+    def get_full_conversation_history(self) -> str:
+        """
+        Get full conversation history as formatted string (from LangChain memory if available)
+        Includes summary + recent messages in summary_buffer mode
+
+        Returns:
+            Formatted conversation history
+        """
+        if self.enable_langchain_memory and self.langchain_memory:
+            try:
+                lines = []
+
+                # Add summary if exists
+                if self.conversation_summary:
+                    lines.append("=== TÓM TẮT CUỘC HỘI THOẠI TRƯỚC ĐÓ ===")
+                    lines.append(self.conversation_summary)
+                    lines.append("\n=== CÁC TIN NHẮN GẦN ĐÂY ===")
+
+                # Add recent messages
+                messages = self.langchain_memory.messages
+                for msg in messages:
+                    prefix = "🤖 VNPT Assistant" if isinstance(msg, AIMessage) else "👤 Khách hàng"
+                    lines.append(f"{prefix}: {msg.content}")
+
+                return "\n\n".join(lines) if lines else "Chưa có cuộc hội thoại"
+
+            except Exception as e:
+                logger.error(f"Failed to get conversation history from LangChain: {e}")
+
+        # Fallback to basic history
+        lines = []
+        for turn in self.conversation_history:
+            lines.append(f"👤 Khách hàng: {turn['user_query']}")
+            lines.append(f"🤖 VNPT Assistant: {turn['bot_response'].get('answer', '')}")
+        return "\n\n".join(lines) if lines else "Chưa có cuộc hội thoại"
+
     def clear_context(self):
-        """Clear conversation context"""
+        """Clear conversation context (both basic and LangChain memory)"""
         self.conversation_history = []
         self.current_context = {
             "topic": None,
@@ -606,17 +929,37 @@ class ConversationContextManager:
             "last_faq_id": None,
             "last_answer": None
         }
+
+        # Clear LangChain memory if enabled
+        if self.enable_langchain_memory and self.langchain_memory:
+            try:
+                self.langchain_memory.clear()
+                self.conversation_summary = ""
+                self.summary_message_count = 0
+                logger.info("LangChain memory cleared")
+            except Exception as e:
+                logger.error(f"Failed to clear LangChain memory: {e}")
+
         logger.info("Conversation context cleared")
 
     def get_summary(self) -> Dict:
-        """Get conversation context summary"""
-        return {
+        """Get conversation context summary (including LangChain memory info)"""
+        summary = {
             "num_turns": len(self.conversation_history),
             "current_topic": self.current_context.get("topic"),
             "total_steps": len(self.current_context.get("all_steps", [])),
             "completed_steps": len(self.current_context.get("completed_steps", [])),
-            "has_active_context": len(self.conversation_history) > 0
+            "has_active_context": len(self.conversation_history) > 0,
+            "langchain_memory_enabled": self.enable_langchain_memory,
         }
+
+        # Add LangChain memory info
+        if self.enable_langchain_memory and self.langchain_memory:
+            memory_summary = self.get_memory_summary()
+            summary["langchain_memory_summary"] = memory_summary
+            summary["memory_type"] = self.langchain_memory.__class__.__name__
+
+        return summary
 
 
 # ============================================

@@ -176,8 +176,11 @@ Hãy trả lời một cách thân thiện và lịch sự:
         context = "\n".join(context_parts)
 
         # Add continuation context instructions if present
+        # CRITICAL: Skip if answer is a completion message
         continuation_instruction = ""
-        if continuation_context:
+        is_completion_answer = ("✅" in answer and ("hoàn thành tất cả" in answer or "Hotline: 1900" in answer))
+
+        if continuation_context and not is_completion_answer:
             # Case 1: Status-based continuation
             if continuation_context.get("status_result"):
                 status = continuation_context["status_result"]
@@ -220,14 +223,16 @@ Trả lời câu hỏi dựa trên thông tin từ NGỮ CẢNH bên dưới.
 📋 NGUYÊN TẮC (QUAN TRỌNG):
 1. **Nội dung**:
    - CHỈ sử dụng thông tin từ NGỮ CẢNH, KHÔNG bịa thêm
-   - BẮT BUỘC giữ TOÀN BỘ nội dung quan trọng (các bước, lưu ý, cảnh báo)
+   - CHỈ trả lời ĐÚNG câu hỏi người dùng, KHÔNG thêm thông tin không liên quan
+   - Nếu NGỮ CẢNH có nhiều FAQ: CHỈ dùng FAQ phù hợp nhất với câu hỏi
 2. **Format - NGẮN GỌN**:
    - MỖI bước XUỐNG DÒNG riêng (Bước 1, Bước 2,...)
    - KHÔNG dùng bullet points (•) trong mỗi bước
    - Nội dung mỗi bước viết LIỀN MẠCH, ngắn gọn, không xuống dòng chi tiết con
-3. **Phần "Lưu ý"**: BẮT BUỘC giữ nguyên nếu có trong NGỮ CẢNH
+3. **Phần "Lưu ý"**: CHỈ bao gồm nếu nó TRỰC TIẾP liên quan đến câu hỏi được hỏi
 4. **Icon/Emoji**: CÓ THỂ thêm icon thân thiện (⚠️ 💡 ✅ ❌ 📞) khi phù hợp để làm nổi bật thông tin quan trọng
-5. **KHÔNG thêm**: Câu mở đầu dài "Chào bạn! Tôi hiểu...", "Câu hỏi liên quan" không cần thiết
+5. **KHÔNG thêm**: Câu mở đầu dài "Chào bạn! Tôi hiểu...", "Câu hỏi liên quan" không cần thiết, hoặc "Lưu ý" từ FAQ khác
+6. **⚠️ COMPLETION MESSAGE**: Nếu NGỮ CẢNH chứa thông báo hoàn thành (có ✅, "đã hoàn thành tất cả", "Hotline: 1900"), GIỮ NGUYÊN thông báo đó, KHÔNG đổi thành format bước
 
 📋 VÍ DỤ FORMAT TỐT:
 
@@ -250,10 +255,21 @@ Bước 4: Nhập số tài khoản/số thẻ và ấn Kiểm tra
 ```
 (Lưu ý: Câu mở đầu ngắn gọn "Bước tiếp theo:", GIỮ NGUYÊN số bước 4, KHÔNG đánh lại thành "Bước 1")
 
+**Completion message** (đã hoàn thành TẤT CẢ các bước):
+```
+✅ Bạn đã hoàn thành tất cả 5 bước!
+
+Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn
+```
+(Lưu ý: GIỮ NGUYÊN toàn bộ completion message, KHÔNG format lại)
+
 ⚠️ CRITICAL:
 - Mỗi bước PHẢI xuống dòng riêng
 - KHÔNG dùng bullet points (•), nội dung trong bước viết liền
-- PHẢI giữ phần "Lưu ý" nếu có trong NGỮ CẢNH!
+- CHỈ bao gồm "Lưu ý" nếu nó TRỰC TIẾP liên quan đến câu hỏi (KHÔNG tự động thêm từ FAQ khác!)
+- Nếu là COMPLETION MESSAGE: GIỮ NGUYÊN, không format lại
 
 {continuation_instruction}📚 NGỮ CẢNH (Độ tin cậy: {confidence:.0%}):
 {context}
@@ -281,14 +297,16 @@ QUY TẮC FORMAT (CRITICAL):
 - MỖI bước XUỐNG DÒNG riêng
 - KHÔNG dùng bullet points (•)
 - Nội dung trong bước viết LIỀN MẠCH, ngắn gọn, không xuống dòng chi tiết con
-- BẮT BUỘC giữ phần "Lưu ý" nếu có trong NGỮ CẢNH
+- CHỈ bao gồm "Lưu ý" nếu nó TRỰC TIẾP liên quan đến câu hỏi được hỏi
 - CÓ THỂ thêm icon thân thiện (⚠️ 💡 ✅ ❌ 📞) khi phù hợp
-- KHÔNG thêm: "Chào bạn", "Câu hỏi liên quan"
+- KHÔNG thêm: "Chào bạn", "Câu hỏi liên quan", hoặc "Lưu ý" từ FAQ không liên quan
 - KHI TIẾP TỤC HỘI THOẠI: Dùng câu mở đầu tự nhiên như "Các bước tiếp theo là:", "Tiếp theo, bạn cần làm:", KHÔNG lặp lại intro ban đầu
+- ⚠️ COMPLETION MESSAGE: Nếu NGỮ CẢNH có thông báo hoàn thành (✅, "đã hoàn thành tất cả", "Hotline: 1900"), GIỮ NGUYÊN toàn bộ, KHÔNG format lại
 
 VÍ DỤ FORMAT:
 1. Câu hỏi đầu (8 bước): "Để nạp tiền: Bước 1: ..., Bước 2: ..., Bước 3: ..."
 2. Câu tiếp theo (đã làm 3 bước, cần bước 4): "Bước tiếp theo: Bước 4: ..." (GIỮ NGUYÊN số 4, KHÔNG đánh lại thành Bước 1!)
+3. Hoàn thành tất cả: "✅ Bạn đã hoàn thành tất cả X bước! Nếu bạn vẫn gặp vấn đề... 📞 Hotline: 1900 8198" (GIỮ NGUYÊN, KHÔNG đổi format)
 """
 
             # Call OpenAI API

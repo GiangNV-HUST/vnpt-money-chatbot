@@ -237,16 +237,27 @@ class Neo4jGraphRAGEngine:
         if not query_entities:
             return []
 
-        # Build entity lists for different types
+        # Build entity lists for different types (EXPANDED to include ALL entity types)
         topics = query_entities.get("Topic", [])
         services = query_entities.get("Service", [])
         banks = query_entities.get("Bank", [])
         errors = query_entities.get("Error", [])
         actions = query_entities.get("Action", [])
         features = query_entities.get("Feature", [])
+        requirements = query_entities.get("Requirement", [])
+        timeframes = query_entities.get("TimeFrame", [])
+        statuses = query_entities.get("Status", [])
+        documents = query_entities.get("Document", [])
+        account_types = query_entities.get("AccountType", [])
+        ui_elements = query_entities.get("UIElement", [])
+        contact_channels = query_entities.get("ContactChannel", [])
+        fees = query_entities.get("Fee", [])
+        limits = query_entities.get("Limit", [])
 
         # Combine all entity names for matching
-        all_entities = topics + services + banks + errors + actions + features
+        all_entities = (topics + services + banks + errors + actions + features +
+                       requirements + timeframes + statuses + documents + account_types +
+                       ui_elements + contact_channels + fees + limits)
 
         if not all_entities:
             return []
@@ -296,19 +307,32 @@ class Neo4jGraphRAGEngine:
              // Count exact matches vs partial matches
              size([e_name IN matched_entities WHERE e_name IN $entity_names]) as exact_matches
 
-        // ENTITY-SPECIFIC FILTERING: Check Service/Bank/Error matches
+        // ENTITY-SPECIFIC FILTERING: Check ALL entity type matches (EXPANDED!)
         OPTIONAL MATCH (f)-[:MENTIONS_SERVICE]->(s:Service)
         OPTIONAL MATCH (f)-[:MENTIONS_BANK]->(b:Bank)
         OPTIONAL MATCH (f)-[:DESCRIBES_ERROR]->(err:Error)
+        OPTIONAL MATCH (f)-[:SUGGESTS_ACTION]->(act:Action)
+        OPTIONAL MATCH (f)-[:USES_FEATURE]->(feat:Feature)
+        OPTIONAL MATCH (f)-[:HAS_FEE]->(fee:Fee)
+        OPTIONAL MATCH (f)-[:HAS_LIMIT]->(lim:Limit)
+        OPTIONAL MATCH (f)-[:HAS_STATUS]->(stat:Status)
+        OPTIONAL MATCH (f)-[:REQUIRES]->(req:Requirement)
 
         WITH f, entity_matches, rel_types, entity_types, matched_entities, exact_matches,
              collect(DISTINCT s.name) as faq_services,
              collect(DISTINCT b.name) as faq_banks,
-             collect(DISTINCT err.name) as faq_errors
+             collect(DISTINCT err.name) as faq_errors,
+             collect(DISTINCT act.name) as faq_actions,
+             collect(DISTINCT feat.name) as faq_features,
+             collect(DISTINCT fee.name) as faq_fees,
+             collect(DISTINCT lim.name) as faq_limits,
+             collect(DISTINCT stat.name) as faq_statuses,
+             collect(DISTINCT req.name) as faq_requirements
 
-        // Calculate Service/Bank/Error match bonus
+        // Calculate ALL entity match bonuses (EXPANDED!)
         WITH f, entity_matches, rel_types, entity_types, matched_entities, exact_matches,
-             faq_services, faq_banks, faq_errors,
+             faq_services, faq_banks, faq_errors, faq_actions, faq_features,
+             faq_fees, faq_limits, faq_statuses, faq_requirements,
              // BOOST if FAQ has the EXACT Service entity from query
              CASE
                WHEN size($query_services) > 0 AND
@@ -351,9 +375,35 @@ class Neo4jGraphRAGEngine:
                THEN 3.0  // GOOD BOOST: Partial error match (fuzzy)
 
                ELSE 0.0
-             END as error_match_bonus
+             END as error_match_bonus,
+             // NEW: BOOST for Action match (IMPORTANT!)
+             CASE
+               WHEN size($query_actions) > 0 AND
+                    ANY(qa IN $query_actions WHERE qa IN faq_actions)
+               THEN 1.8  // STRONG BOOST for action match
+               ELSE 0.0
+             END as action_match_bonus,
+             // NEW: BOOST for Fee match (IMPORTANT!)
+             CASE
+               WHEN size($query_fees) > 0 AND size(faq_fees) > 0
+               THEN 2.0  // VERY STRONG BOOST for fee-related queries
+               ELSE 0.0
+             END as fee_match_bonus,
+             // NEW: BOOST for Status match
+             CASE
+               WHEN size($query_statuses) > 0 AND
+                    ANY(qs IN $query_statuses WHERE qs IN faq_statuses)
+               THEN 1.5  // STRONG BOOST for status match
+               ELSE 0.0
+             END as status_match_bonus,
+             // NEW: BOOST for Limit match
+             CASE
+               WHEN size($query_limits) > 0 AND size(faq_limits) > 0
+               THEN 1.5  // STRONG BOOST for limit-related queries
+               ELSE 0.0
+             END as limit_match_bonus
 
-        // Calculate graph-based score with entity-specific boosting
+        // Calculate graph-based score with entity-specific boosting (EXPANDED!)
         WITH f,
              entity_matches,
              rel_types,
@@ -363,6 +413,10 @@ class Neo4jGraphRAGEngine:
              service_match_bonus,
              bank_match_bonus,
              error_match_bonus,
+             action_match_bonus,
+             fee_match_bonus,
+             status_match_bonus,
+             limit_match_bonus,
              // Bonus for specific relationship types (REDUCED ERROR BOOST)
              CASE
                WHEN 'DESCRIBES_ERROR' IN rel_types THEN 1.5  // REDUCED from 3.0 (let error_match_bonus handle it)
@@ -376,14 +430,19 @@ class Neo4jGraphRAGEngine:
              exact_matches * 0.5 as exact_match_bonus
 
         RETURN f.id as id,
-               (entity_matches * rel_weight + exact_match_bonus + service_match_bonus + bank_match_bonus + error_match_bonus) as graph_score,
+               (entity_matches * rel_weight + exact_match_bonus + service_match_bonus + bank_match_bonus +
+                error_match_bonus + action_match_bonus + fee_match_bonus + status_match_bonus + limit_match_bonus) as graph_score,
                entity_matches,
                rel_types,
                entity_types,
                matched_entities,
                service_match_bonus,
                bank_match_bonus,
-               error_match_bonus
+               error_match_bonus,
+               action_match_bonus,
+               fee_match_bonus,
+               status_match_bonus,
+               limit_match_bonus
         ORDER BY graph_score DESC
         LIMIT $top_k
         """
@@ -395,6 +454,10 @@ class Neo4jGraphRAGEngine:
                 "query_services": services,
                 "query_banks": banks,
                 "query_errors": errors,
+                "query_actions": actions,
+                "query_fees": fees,
+                "query_statuses": statuses,
+                "query_limits": limits,
                 "top_k": top_k
             }
         )
@@ -406,13 +469,20 @@ class Neo4jGraphRAGEngine:
         # Normalize scores
         max_score = max([r["graph_score"] for r in results]) if results else 1.0
 
-        # Log entity-specific boosts for monitoring
+        # Log entity-specific boosts for monitoring (EXPANDED!)
         for r in results[:5]:  # Log top 5
-            if r.get("service_match_bonus", 0) != 0 or r.get("bank_match_bonus", 0) != 0 or r.get("error_match_bonus", 0) != 0:
-                logger.info(f"  FAQ {r['id']}: service_boost={r.get('service_match_bonus', 0):.2f}, "
-                          f"bank_boost={r.get('bank_match_bonus', 0):.2f}, "
-                          f"error_boost={r.get('error_match_bonus', 0):.2f}, "
-                          f"total_score={r['graph_score']:.2f}")
+            if (r.get("service_match_bonus", 0) != 0 or r.get("bank_match_bonus", 0) != 0 or
+                r.get("error_match_bonus", 0) != 0 or r.get("action_match_bonus", 0) != 0 or
+                r.get("fee_match_bonus", 0) != 0 or r.get("status_match_bonus", 0) != 0 or
+                r.get("limit_match_bonus", 0) != 0):
+                logger.info(f"  FAQ {r['id']}: service={r.get('service_match_bonus', 0):.2f}, "
+                          f"bank={r.get('bank_match_bonus', 0):.2f}, "
+                          f"error={r.get('error_match_bonus', 0):.2f}, "
+                          f"action={r.get('action_match_bonus', 0):.2f}, "
+                          f"fee={r.get('fee_match_bonus', 0):.2f}, "
+                          f"status={r.get('status_match_bonus', 0):.2f}, "
+                          f"limit={r.get('limit_match_bonus', 0):.2f}, "
+                          f"total={r['graph_score']:.2f}")
 
         return [
             {
@@ -423,7 +493,11 @@ class Neo4jGraphRAGEngine:
                 "rel_types": r["rel_types"],
                 "service_boost": r.get("service_match_bonus", 0),
                 "bank_boost": r.get("bank_match_bonus", 0),
-                "error_boost": r.get("error_match_bonus", 0)
+                "error_boost": r.get("error_match_bonus", 0),
+                "action_boost": r.get("action_match_bonus", 0),
+                "fee_boost": r.get("fee_match_bonus", 0),
+                "status_boost": r.get("status_match_bonus", 0),
+                "limit_boost": r.get("limit_match_bonus", 0)
             }
             for r in results
         ]
@@ -1005,7 +1079,8 @@ class Neo4jGraphRAGEngine:
         self,
         faq_id: str,
         from_step: int = 1,
-        only_next_step: bool = True
+        only_next_step: bool = True,
+        topic: Optional[str] = None
     ):
         """
         Query Step nodes from Neo4j graph using FAQ ID (MOST ACCURATE)
@@ -1034,8 +1109,11 @@ class Neo4jGraphRAGEngine:
                 where_clause = "WHERE s.number >= $from_step"
                 logger.info(f"   Query mode: ALL REMAINING STEPS (from step {from_step})")
 
+            # CRITICAL: Query BOTH the requested steps AND the total count
             cypher = f"""
             MATCH (faq:FAQ {{question_id: $faq_id}})-[:DESCRIBES_PROCESS]->(p:Process)
+            MATCH (p)-[:HAS_STEP]->(all_s:Step)
+            WITH faq, p, count(all_s) as total_count
             MATCH (p)-[:HAS_STEP]->(s:Step)
             {where_clause}
             RETURN faq.question as faq_question,
@@ -1043,7 +1121,8 @@ class Neo4jGraphRAGEngine:
                    p.name as process_name,
                    p.id as process_id,
                    s.number as step_num,
-                   s.text as step_text
+                   s.text as step_text,
+                   total_count as total_steps_in_process
             ORDER BY s.number
             """
             params = {"faq_id": faq_id, "from_step": from_step}
@@ -1052,17 +1131,205 @@ class Neo4jGraphRAGEngine:
 
             if not results:
                 logger.warning(f"No steps found for FAQ ID: {faq_id}")
-                return None
+
+                # FALLBACK 1: Try to get total count for this FAQ_ID
+                count_cypher = """
+                MATCH (faq:FAQ {question_id: $faq_id})-[:DESCRIBES_PROCESS]->(p:Process)
+                MATCH (p)-[:HAS_STEP]->(s:Step)
+                RETURN count(s) as total_count
+                """
+                count_result = self.connector.execute_query(count_cypher, {"faq_id": faq_id})
+                if count_result and count_result[0]['total_count'] > 0:
+                    # Process exists but requested step doesn't exist (beyond last step)
+                    logger.info(f"✅ Process has {count_result[0]['total_count']} steps total, step {from_step} not found (user completed all)")
+                    return {
+                        "steps": [],
+                        "total_steps": 0,  # No more steps to show
+                        "total_steps_in_process": count_result[0]['total_count']  # But process has this many total
+                    }
+
+                # FALLBACK 2: FAQ_ID not in graph (question_id is None)
+                # Try to infer process from FAQ_ID pattern or topic
+                logger.warning(f"FAQ_ID '{faq_id}' not found in graph, trying pattern-based fallback")
+                return self._query_steps_by_faq_id_fallback(faq_id, from_step, only_next_step, topic)
 
             # Build result
             first_row = results[0]
+            total_steps_in_process = first_row['total_steps_in_process']
+
             result = {
                 "faq_question": first_row['faq_question'],
                 "faq_answer": first_row['faq_answer'],
                 "process_name": first_row['process_name'],
                 "process_id": first_row['process_id'],
                 "steps": [],
-                "direction_score": 10  # Perfect match since we're using exact FAQ ID
+                "direction_score": 10,  # Perfect match since we're using exact FAQ ID
+                "total_steps_in_process": total_steps_in_process  # CRITICAL: Total steps in the whole process
+            }
+
+            for row in results:
+                result["steps"].append({
+                    "number": row['step_num'],
+                    "text": row['step_text']
+                })
+
+            result["total_steps"] = len(result["steps"])  # Number of steps returned in this query
+
+            logger.info(f"📊 Query by FAQ ID SUCCESS: Found {result['total_steps']} steps")
+            logger.info(f"   FAQ: {result['faq_question'][:60]}...")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to query steps by FAQ ID: {e}")
+            return None
+
+    def _query_steps_by_faq_id_fallback(
+        self,
+        faq_id: str,
+        from_step: int = 1,
+        only_next_step: bool = True,
+        topic: Optional[str] = None
+    ):
+        """
+        Fallback method when FAQ_ID is not found in graph (question_id is None).
+        Infer process type and keywords from FAQ_ID pattern OR topic.
+
+        Args:
+            faq_id: The FAQ ID (e.g., "FAQ_RUT_TIEN", "FAQ_129")
+            from_step: Get steps from this number onwards
+            only_next_step: If True, only return the immediate next step
+            topic: Topic from context (e.g., "rút tiền", "nạp tiền")
+
+        Returns:
+            Same format as _query_steps_by_faq_id or None
+        """
+        try:
+            # Map topics/keywords to process name
+            topic_to_process = {
+                "rút tiền": ("withdrawal", ["rút tiền", "ví", "ngân hàng"]),
+                "withdrawal": ("withdrawal", ["rút tiền", "ví", "ngân hàng"]),
+                "nạp tiền": ("deposit", ["nạp tiền", "ngân hàng"]),
+                "deposit": ("deposit", ["nạp tiền", "ngân hàng"]),
+                "chuyển tiền": ("transfer", ["chuyển tiền", "ngân hàng"]),
+                "transfer": ("transfer", ["chuyển tiền", "ngân hàng"]),
+                "thanh toán": ("payment", ["thanh toán"]),
+                "payment": ("payment", ["thanh toán"]),
+                "mua vé": ("buy_ticket", ["mua vé"]),
+                "buy_ticket": ("buy_ticket", ["mua vé"]),
+            }
+
+            # Extract process info from FAQ_ID pattern (old method)
+            faq_patterns = {
+                "FAQ_RUT_TIEN": ("withdrawal", ["rút tiền", "ví", "ngân hàng"]),
+                "FAQ_NAP_TIEN": ("deposit", ["nạp tiền", "ngân hàng"]),
+                "FAQ_CHUYEN_TIEN": ("transfer", ["chuyển tiền", "ngân hàng"]),
+                "FAQ_THANH_TOAN": ("payment", ["thanh toán"]),
+                "FAQ_MUA_VE": ("buy_ticket", ["mua vé"]),
+            }
+
+            process_name = None
+            keywords = []
+
+            # Try to infer from FAQ_ID pattern first
+            for pattern, (proc_name, kws) in faq_patterns.items():
+                if pattern in faq_id.upper():
+                    process_name = proc_name
+                    keywords = kws
+                    logger.info(f"🔍 Fallback: Inferred '{process_name}' from FAQ_ID pattern '{faq_id}'")
+                    break
+
+            # If not found, try to infer from topic
+            if not process_name and topic:
+                topic_lower = topic.lower().strip()
+                for topic_key, (proc_name, kws) in topic_to_process.items():
+                    if topic_key in topic_lower or topic_lower in topic_key:
+                        process_name = proc_name
+                        keywords = kws
+                        logger.info(f"🔍 Fallback: Inferred '{process_name}' from topic '{topic}'")
+                        break
+
+            if not process_name:
+                logger.warning(f"Cannot infer process from FAQ_ID '{faq_id}' or topic '{topic}'")
+                return None
+
+            logger.info(f"🔍 Fallback: Inferred process '{process_name}' from FAQ_ID '{faq_id}'")
+            logger.info(f"   Keywords: {keywords}")
+
+            # Build WHERE clause for keywords
+            keyword_conditions = " OR ".join([f"toLower(faq.question) CONTAINS '{kw}'" for kw in keywords])
+
+            # Build WHERE clause for steps
+            if only_next_step:
+                step_where = "WHERE s.number = $from_step"
+            else:
+                step_where = "WHERE s.number >= $from_step"
+
+            # Query by process name + keywords
+            # IMPORTANT: Prioritize processes with MORE steps (more detailed/complete)
+            cypher = f"""
+            MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process {{name: $process_name}})
+            WHERE {keyword_conditions}
+            MATCH (p)-[:HAS_STEP]->(all_s:Step)
+            WITH faq, p, count(all_s) as total_count
+            ORDER BY total_count DESC
+            LIMIT 1
+            MATCH (p)-[:HAS_STEP]->(s:Step)
+            {step_where}
+            RETURN faq.question as faq_question,
+                   faq.answer as faq_answer,
+                   p.name as process_name,
+                   p.id as process_id,
+                   s.number as step_num,
+                   s.text as step_text,
+                   total_count as total_steps_in_process
+            ORDER BY s.number
+            """
+
+            params = {
+                "process_name": process_name,
+                "from_step": from_step
+            }
+
+            results = self.connector.execute_query(cypher, params)
+
+            if not results:
+                logger.warning(f"Fallback query found no results for process '{process_name}'")
+
+                # Try to get total count even if step not found
+                # IMPORTANT: Prioritize processes with MORE steps (most detailed)
+                count_cypher = f"""
+                MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process {{name: $process_name}})
+                WHERE {keyword_conditions}
+                MATCH (p)-[:HAS_STEP]->(s:Step)
+                WITH p, count(s) as step_count
+                ORDER BY step_count DESC
+                LIMIT 1
+                RETURN step_count as total_count
+                """
+
+                count_result = self.connector.execute_query(count_cypher, {"process_name": process_name})
+                if count_result and count_result[0]['total_count'] > 0:
+                    logger.info(f"✅ Fallback: Process has {count_result[0]['total_count']} steps total, step {from_step} not found")
+                    return {
+                        "steps": [],
+                        "total_steps": 0,
+                        "total_steps_in_process": count_result[0]['total_count']
+                    }
+                return None
+
+            # Build result
+            first_row = results[0]
+            total_steps_in_process = first_row['total_steps_in_process']
+
+            result = {
+                "faq_question": first_row['faq_question'],
+                "faq_answer": first_row['faq_answer'],
+                "process_name": first_row['process_name'],
+                "process_id": first_row['process_id'],
+                "steps": [],
+                "direction_score": 8,  # Lower than exact FAQ_ID match
+                "total_steps_in_process": total_steps_in_process
             }
 
             for row in results:
@@ -1073,13 +1340,14 @@ class Neo4jGraphRAGEngine:
 
             result["total_steps"] = len(result["steps"])
 
-            logger.info(f"📊 Query by FAQ ID SUCCESS: Found {result['total_steps']} steps")
+            logger.info(f"✅ Fallback query SUCCESS: Found {result['total_steps']} steps")
+            logger.info(f"   Total steps in process: {total_steps_in_process}")
             logger.info(f"   FAQ: {result['faq_question'][:60]}...")
 
             return result
 
         except Exception as e:
-            logger.error(f"Failed to query steps by FAQ ID: {e}")
+            logger.error(f"Fallback query failed: {e}")
             return None
 
     def _query_steps_from_graph(
@@ -1269,6 +1537,60 @@ class Neo4jGraphRAGEngine:
         if last_faq_id:
             logger.info(f"   Last FAQ ID from context: {last_faq_id}")
 
+        # CRITICAL: Check if all steps are completed BEFORE querying graph
+        # Check if continuation context indicates all steps completed
+        if continuation_context.get("all_steps_completed", False):
+            logger.info(f"✅ All action steps completed! (next step is a completion/result step)")
+            return {
+                "status": "success",
+                "question": f"Hoàn thành tất cả các bước {topic if topic else 'thực hiện'}",
+                "answer": f"""✅ Hiện tại tất cả các bước đã hoàn thành!
+
+Giao dịch của bạn sẽ được xử lý và bạn sẽ nhận được kết quả trên màn hình xác nhận.
+
+Nếu giao dịch chưa thành công hoặc bạn cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn""",
+                "confidence": 1.0,
+                "related_entities": continuation_context.get("entities", {}),
+                "alternative_actions": [],
+                "related_questions": [],
+                "all_results": [],
+                "is_continuation": True,
+                "is_completed": True,
+                "completed_step": completed_step,
+                "next_steps": [],
+                "total_steps": completed_step
+            }
+
+        # Get total steps from cached context
+        total_steps_in_process = 0
+        if all_steps:
+            total_steps_in_process = len(all_steps)
+
+        # Check if user completed ALL steps (fallback for old behavior)
+        if total_steps_in_process > 0 and completed_step >= total_steps_in_process:
+            logger.info(f"✅ All steps completed! (completed_step={completed_step}, total={total_steps_in_process})")
+            return {
+                "status": "success",
+                "question": f"Hoàn thành tất cả các bước {topic if topic else 'thực hiện'}",
+                "answer": f"""✅ Bạn đã hoàn thành tất cả {total_steps_in_process} bước!
+
+Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn""",
+                "confidence": 1.0,
+                "related_entities": continuation_context.get("entities", {}),
+                "alternative_actions": [],
+                "related_questions": [],
+                "all_results": [],
+                "is_continuation": True,
+                "is_completed": True,
+                "completed_step": completed_step,
+                "next_steps": [],
+                "total_steps": total_steps_in_process
+            }
+
         # CRITICAL FIX: ALWAYS try graph query first if FAQ ID is available
         # Graph data is more accurate than regex-extracted cached steps
         graph_result = None
@@ -1276,7 +1598,7 @@ class Neo4jGraphRAGEngine:
             logger.info("🔍 PRIORITY: Querying Step nodes from graph using FAQ ID...")
             logger.info(f"   Using FAQ ID for accurate retrieval: {last_faq_id}")
             # Only get the NEXT step, not all remaining steps
-            graph_result = self._query_steps_by_faq_id(last_faq_id, from_step=next_step, only_next_step=True)
+            graph_result = self._query_steps_by_faq_id(last_faq_id, from_step=next_step, only_next_step=True, topic=topic)
 
             # PRIORITY 2: Fallback to keyword-based query if FAQ ID not available or failed
             if not graph_result:
@@ -1288,6 +1610,68 @@ class Neo4jGraphRAGEngine:
 
                 # GRAPH QUERY: Get steps directly from Step nodes (only next step)
                 graph_result = self._query_steps_from_graph(base_query, from_step=next_step, only_next_step=True)
+
+            # CRITICAL: Check if we're beyond the last step
+            # Use total_steps_in_process from graph (most accurate)
+            if graph_result:
+                total_from_graph = graph_result.get('total_steps_in_process', 0)
+                if total_from_graph > 0:
+                    logger.info(f"📊 Graph reports total steps in process: {total_from_graph}")
+                    # Check if user completed all steps
+                    if completed_step >= total_from_graph:
+                        logger.info(f"✅ User completed all {total_from_graph} steps (completed_step={completed_step})")
+                        return {
+                            "status": "success",
+                            "question": f"Hoàn thành tất cả các bước {topic if topic else 'thực hiện'}",
+                            "answer": """✅ Hiện tại tất cả các bước đã hoàn thành!
+
+Giao dịch của bạn sẽ được xử lý và bạn sẽ nhận được kết quả trên màn hình xác nhận.
+
+Nếu giao dịch chưa thành công hoặc bạn cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn""",
+                            "confidence": 1.0,
+                            "related_entities": continuation_context.get("entities", {}),
+                            "alternative_actions": [],
+                            "related_questions": [],
+                            "all_results": [{
+                                "question_id": last_faq_id,
+                                "question": graph_result.get('faq_question', '')
+                            }],
+                            "is_continuation": True,
+                            "is_completed": True,
+                            "completed_step": completed_step,
+                            "next_steps": [],
+                            "total_steps": total_from_graph
+                        }
+
+            # Fallback: Check if graph query returned NO steps (meaning we're beyond the last step)
+            if graph_result and graph_result.get('total_steps', 0) == 0:
+                logger.info(f"✅ No more steps in graph (user completed all steps)")
+                return {
+                    "status": "success",
+                    "question": f"Hoàn thành tất cả các bước {topic if topic else 'thực hiện'}",
+                    "answer": """✅ Hiện tại tất cả các bước đã hoàn thành!
+
+Giao dịch của bạn sẽ được xử lý và bạn sẽ nhận được kết quả trên màn hình xác nhận.
+
+Nếu giao dịch chưa thành công hoặc bạn cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn""",
+                    "confidence": 1.0,
+                    "related_entities": continuation_context.get("entities", {}),
+                    "alternative_actions": [],
+                    "related_questions": [],
+                    "all_results": [{
+                        "question_id": last_faq_id,
+                        "question": graph_result.get('faq_question', '')
+                    }],
+                    "is_continuation": True,
+                    "is_completed": True,
+                    "completed_step": completed_step,
+                    "next_steps": [],
+                    "total_steps": 0
+                }
 
             if graph_result:
                 # SUCCESS: Found steps in graph!
@@ -1315,6 +1699,8 @@ class Neo4jGraphRAGEngine:
                 preserved_entities = continuation_context.get("entities", {})
                 if continuation_context.get("topic") and "topics" not in preserved_entities:
                     preserved_entities["topics"] = [continuation_context["topic"]]
+
+                logger.info(f"🔄 Returning continuation response with next_steps: {steps_metadata}")
 
                 return {
                     "status": "success",
@@ -1350,11 +1736,42 @@ class Neo4jGraphRAGEngine:
             logger.info("   Extracting steps from previous answer")
             tracker.extract_steps(previous_answer)
 
-        # If still no steps, do a regular FAQ search
+        # Check if user asking for next step when all steps completed
+        if tracker.has_steps():
+            total_cached_steps = tracker.get_total_steps()
+            if next_step > total_cached_steps:
+                logger.info(f"✅ All cached steps completed! (next_step={next_step}, total={total_cached_steps})")
+                return {
+                    "status": "success",
+                    "question": f"Hoàn thành tất cả các bước {topic if topic else 'thực hiện'}",
+                    "answer": f"""✅ Bạn đã hoàn thành tất cả {total_cached_steps} bước!
+
+Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng liên hệ:
+📞 Hotline: 1900 8198 (24/7)
+✉️ Email: hotro@vnptmoney.vn""",
+                    "confidence": 1.0,
+                    "related_entities": continuation_context.get("entities", {}),
+                    "alternative_actions": [],
+                    "related_questions": [],
+                    "all_results": [],
+                    "is_continuation": True,
+                    "is_completed": True,
+                    "completed_step": completed_step,
+                    "next_steps": [],
+                    "total_steps": total_cached_steps
+                }
+
+        # If still no steps, do a regular FAQ search WITH TOPIC CONTEXT
         if not tracker.has_steps():
             logger.warning("⚠️  No cached steps available, falling back to FAQ search")
             import re
             base_query = re.sub(r'sau\s+khi\s+.*$', '', user_query, flags=re.IGNORECASE).strip()
+
+            # CRITICAL: Add topic to query to avoid getting wrong FAQ
+            if topic:
+                base_query = f"{topic} {base_query}"
+                logger.info(f"   Added topic to query: '{base_query}'")
+
             relevant_nodes = self._find_relevant_nodes(base_query, query_entities, 5, "HOW_TO")
             context = self._get_graph_context(relevant_nodes, query_entities, base_query)
             return self._rank_results(context, base_query, "HOW_TO", query_entities)
