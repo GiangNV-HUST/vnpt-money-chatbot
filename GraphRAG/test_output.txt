@@ -1,0 +1,177 @@
+INFO:neo4j_connector:Connecting to Neo4j at bolt://localhost:7687...
+INFO:neo4j_connector:\u2705 Connected to Neo4j successfully
+2025-12-25 10:48:42.840158: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-25 10:48:45.098281: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+WARNING:tensorflow:From C:\Users\GIANG\AppData\Local\Programs\Python\Python311\Lib\site-packages\tf_keras\src\losses.py:2976: The name tf.losses.sparse_softmax_cross_entropy is deprecated. Please use tf.compat.v1.losses.sparse_softmax_cross_entropy instead.
+
+INFO:datasets:PyTorch version 2.8.0 available.
+INFO:datasets:TensorFlow version 2.18.0 available.
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: cpu
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: C:\Users\GIANG\OneDrive - Hanoi University of Science and Technology\Documents\VNPT_Media_Software\Chatbot\models\vnpt-sbert-mnrl
+WARNING:sentence_transformers.SentenceTransformer:You try to use a model that was created with version 4.1.0, however, your version is 3.3.1. This might cause unexpected behavior or errors. In that case, try to update to the latest version.
+
+
+
+INFO:neo4j_rag_engine:Embeddings model loaded successfully
+INFO:neo4j_rag_engine:Enhanced entity extractor initialized (regex + confidence scoring)
+INFO:neo4j_rag_engine:Intent classifier initialized
+INFO:neo4j_rag_engine:Step extractor initialized
+INFO:neo4j_rag_engine:Processing query: TÙi cÛ th\u1ec3 r˙t ti\u1ec1n t\u1eeb t‡i kho\u1ea3n Mobile Money v\u1ec1 t‡i kho\u1ea3n ng‚n h‡ng nh\u01b0 th\u1ebf n‡o?
+INFO:neo4j_rag_engine:Query intent: HOW_TO (confidence: 14.71%)
+INFO:enhanced_entity_extractor:\U0001f916 LLM fallback triggered: low_confidence (40.00% < 50.00%)
+INFO:enhanced_entity_extractor:   Pattern confidence: 40.00%
+INFO:llm_entity_extractor:Initialized LLM Entity Extractor with openai (gpt-4o-mini)
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:enhanced_entity_extractor:   \u2705 LLM extraction successful
+INFO:enhanced_entity_extractor:   LLM entities: {'Topic': ['R˙t ti\u1ec1n'], 'Service': ['VNPT Money'], 'Bank': [], 'Error': [], 'Action': ['R˙t ti\u1ec1n'], 'Requirement': [], 'Feature': [], 'TimeFrame': [], 'Status': [], 'Document': [], 'AccountType': ['T‡i kho\u1ea3n ng‚n h‡ng'], 'UIElement': [], 'ContactChannel': [], 'Fee': [], 'Limit': []}
+INFO:neo4j_rag_engine:Entity extraction confidence: 95.00%
+INFO:neo4j_rag_engine:Extracted entities: {'Requirement': [], 'Status': [], 'Limit': [], 'out_of_scope': False, 'Service': ['VNPT Money'], 'AccountType': ['T‡i kho\u1ea3n ng‚n h‡ng', 'T‡i kho\u1ea3n Mobile Money'], 'ContactChannel': [], 'Fee': [], 'Document': [], 'Bank': [], 'Topic': ['R˙t ti\u1ec1n'], 'UIElement': ['R˙t ti\u1ec1n'], 'Error': [], 'Feature': [], 'TimeFrame': [], 'Action': ['R˙t ti\u1ec1n']}
+INFO:neo4j_rag_engine:Searching graph with entities: ['R˙t ti\u1ec1n', 'VNPT Money', 'R˙t ti\u1ec1n', 'T‡i kho\u1ea3n ng‚n h‡ng', 'T‡i kho\u1ea3n Mobile Money', 'R˙t ti\u1ec1n']
+INFO:neo4j_rag_engine:  \u2192 Service entities (will boost exact matches): ['VNPT Money']
+INFO:neo4j_rag_engine:  FAQ FAQ_183: service=2.00, bank=0.20, error=0.00, action=1.80, fee=0.00, status=0.00, limit=0.00, total=15.50
+INFO:neo4j_rag_engine:  FAQ FAQ_179: service=2.00, bank=0.20, error=0.00, action=1.80, fee=0.00, status=0.00, limit=0.00, total=14.00
+INFO:neo4j_rag_engine:  FAQ FAQ_181: service=2.00, bank=0.20, error=0.00, action=1.80, fee=0.00, status=0.00, limit=0.00, total=14.00
+INFO:neo4j_rag_engine:  FAQ FAQ_422: service=2.00, bank=0.20, error=0.00, action=1.80, fee=0.00, status=0.00, limit=0.00, total=14.00
+INFO:neo4j_rag_engine:  FAQ FAQ_423: service=2.00, bank=0.20, error=0.00, action=1.80, fee=0.00, status=0.00, limit=0.00, total=12.50
+INFO:neo4j_rag_engine:HYBRID MODE: Found 15 results via graph traversal
+INFO:neo4j_rag_engine:Running semantic search with weight: 0.5
+================================================================================
+DEBUGGING: Continuation Query Bug
+================================================================================
+
+================================================================================
+Query 1: T√¥i c√≥ th·ªÉ r√∫t ti·ªÅn t·ª´ t√†i kho·∫£n Mobile Money v·ªÅ t√†i kho·∫£n ng√¢n h√†ng nh∆∞ th·∫ø n√†o?
+================================================================================
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|##########| 1/1 [00:00<00:00,  5.91it/s]Batches: 100%|##########| 1/1 [00:00<00:00,  5.91it/s]
+INFO:neo4j_rag_engine:Found 15 semantic results
+INFO:neo4j_rag_engine:Using HYBRID weighting (graph: 0.5, semantic: 0.5, keyword: 0.0)
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+INFO:neo4j_rag_engine:\U0001f3af EARLY EXACT MATCH BOOST (100.00%): TÙi cÛ th\u1ec3 r˙t ti\u1ec1n t\u1eeb t‡i kho\u1ea3n Mobile Money v\u1ec1 t‡i kho\u1ea3n ng‚n h‡ng nh\u01b0 th\u1ebf n‡o...
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+INFO:neo4j_rag_engine:\u2713 TOPIC boost: Exact match 'R˙t ti\u1ec1n' in FAQ
+INFO:neo4j_rag_engine:\u2713 HOW_TO boost: Found 'nh\u01b0 th\u1ebf n‡o' in instructional FAQ
+INFO:neo4j_rag_engine:Exact match found (100.00%): TÙi cÛ th\u1ec3 r˙t ti\u1ec1n t\u1eeb t‡i kho\u1ea3n Mobile Money v\u1ec1 t‡i kho\u1ea3n ng‚n h‡ng nh\u01b0 th\u1ebf n‡o
+INFO:neo4j_rag_engine:\u2713 TOPIC boost: Exact match 'R˙t ti\u1ec1n' in FAQ
+INFO:neo4j_rag_engine:\u2713 HOW_TO boost: Found 'nh\u01b0 th\u1ebf n‡o' in instructional FAQ
+INFO:neo4j_rag_engine:\u2713 HOW_TO PROCEDURAL boost: FAQ contains numbered steps
+INFO:neo4j_rag_engine:\u2713 TOPIC boost: Exact match 'R˙t ti\u1ec1n' in FAQ
+INFO:neo4j_rag_engine:\u26a0\ufe0f HOW_TO penalty: Found 't\u1ea1i sao' in troubleshooting FAQ
+INFO:neo4j_rag_engine:\u2713 TOPIC boost: Exact match 'R˙t ti\u1ec1n' in FAQ
+INFO:neo4j_rag_engine:\u2713 TOPIC boost: Found 'R˙t ti\u1ec1n' in question text
+INFO:neo4j_rag_engine:
+============================================================
+INFO:neo4j_rag_engine:TOP 3 RESULTS:
+INFO:neo4j_rag_engine:1. FAQ: TÙi cÛ th\u1ec3 r˙t ti\u1ec1n t\u1eeb t‡i kho\u1ea3n Mobile Money v\u1ec1 t‡i kho\u1ea3n n...
+INFO:neo4j_rag_engine:   Score: 2.940
+INFO:neo4j_rag_engine:   Breakdown - Base: 1.000, Exact: 0.400, Topic: 0.500, Intent: 1.000
+INFO:neo4j_rag_engine:2. FAQ: C·c kho\u1ea3n phÌ khi r˙t ti\u1ec1n t\u1eeb t‡i kho\u1ea3n vÌ VNPT Pay \u0111\u01b0\u1ee3c tÌn...
+INFO:neo4j_rag_engine:   Score: 2.060
+INFO:neo4j_rag_engine:   Breakdown - Base: 1.000, Exact: 0.000, Topic: 0.500, Intent: 0.400
+INFO:neo4j_rag_engine:3. FAQ: L‡m sao \u0111\u1ec3 ki\u1ec3m tra chi ti\u1ebft c·c kho\u1ea3n phÌ khi r˙t ti\u1ec1n t\u1eeb v...
+INFO:neo4j_rag_engine:   Score: 1.563
+INFO:neo4j_rag_engine:   Breakdown - Base: 0.903, Exact: 0.000, Topic: 0.500, Intent: 0.000
+INFO:neo4j_rag_engine:============================================================
+
+INFO:step_tracker:Extracted 5 steps from answer
+INFO:neo4j_rag_engine:Processing query: tÙi \u0111„ l‡m xong 3 b\u01b0\u1edbc \u0111\u1ea7u thÏ l‡m gÏ ti\u1ebfp theo
+INFO:neo4j_rag_engine:Query intent: HOW_TO (confidence: 5.88%)
+INFO:enhanced_entity_extractor:\U0001f916 LLM fallback triggered: low_confidence (0.00% < 50.00%)
+INFO:enhanced_entity_extractor:   Pattern confidence: 0.00%
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:enhanced_entity_extractor:   \u2705 LLM extraction successful
+INFO:enhanced_entity_extractor:   LLM entities: {'Topic': [], 'Service': [], 'Bank': [], 'Error': [], 'Action': ['L‡m gÏ ti\u1ebfp theo'], 'Requirement': [], 'Feature': [], 'TimeFrame': [], 'Status': [], 'Document': [], 'AccountType': [], 'UIElement': [], 'ContactChannel': [], 'Fee': [], 'Limit': []}
+INFO:neo4j_rag_engine:Entity extraction confidence: 95.00%
+INFO:neo4j_rag_engine:Extracted entities: {'Requirement': [], 'Status': [], 'Limit': [], 'out_of_scope': False, 'Service': [], 'AccountType': [], 'ContactChannel': [], 'Fee': [], 'Document': [], 'Bank': [], 'Topic': [], 'UIElement': [], 'Error': [], 'Feature': [], 'TimeFrame': [], 'Action': ['L‡m gÏ ti\u1ebfp theo']}
+INFO:neo4j_rag_engine:Searching graph with entities: ['L‡m gÏ ti\u1ebfp theo']
+WARNING:neo4j_rag_engine:No graph results found for entities: ['L‡m gÏ ti\u1ebfp theo']
+WARNING:neo4j_rag_engine:No entities found in query - using keyword fallback
+INFO:neo4j_rag_engine:Processing query: ti\u1ebfp t\u1ee5c
+INFO:neo4j_rag_engine:Query intent: GENERAL (confidence: 0.00%)
+INFO:enhanced_entity_extractor:\U0001f916 LLM fallback triggered: low_confidence (0.00% < 50.00%)
+INFO:enhanced_entity_extractor:   Pattern confidence: 0.00%
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:enhanced_entity_extractor:   \u2705 LLM extraction successful
+INFO:enhanced_entity_extractor:   LLM entities: {'Topic': [], 'Service': [], 'Bank': [], 'Error': [], 'Action': [], 'Requirement': [], 'Feature': [], 'TimeFrame': [], 'Status': [], 'Document': [], 'AccountType': [], 'UIElement': [], 'ContactChannel': [], 'Fee': [], 'Limit': []}
+INFO:neo4j_rag_engine:Entity extraction confidence: 95.00%
+INFO:neo4j_rag_engine:Extracted entities: {'Requirement': [], 'Status': [], 'Limit': [], 'out_of_scope': False, 'Service': [], 'AccountType': [], 'ContactChannel': [], 'Fee': [], 'Document': [], 'Bank': [], 'Topic': [], 'UIElement': [], 'Error': [], 'Feature': [], 'TimeFrame': [], 'Action': []}
+WARNING:neo4j_rag_engine:No entities found in query - using keyword fallback
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `ALTERNATIVE_TO` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=29, offset=29>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 29, 'line': 2, 'column': 29}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+WARNING:neo4j.notifications:Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `reason` does not exist in database `neo4j`. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=38, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 4, 'column': 38}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n        MATCH (a:Action)-[r:ALTERNATIVE_TO]->(alt:Action)\n        WHERE a.name IN $actions\n        RETURN alt.name as action, r.reason as reason\n        '
+INFO:neo4j_rag_engine:
+============================================================
+INFO:neo4j_rag_engine:TOP 3 RESULTS:
+INFO:neo4j_rag_engine:1. FAQ: TÙi mua gÛi c\u01b0\u1edbc l\u1ea7n th\u1ee9 nh\u1ea5t b·o th\u1ea5t b\u1ea1i nh\u01b0ng v\u1eabn b\u1ecb tr\u1eeb ...
+INFO:neo4j_rag_engine:   Score: 1.000
+INFO:neo4j_rag_engine:   Breakdown - Base: 1.000, Exact: 0.000, Topic: 0.000, Intent: 0.000
+INFO:neo4j_rag_engine:2. FAQ: TÙi cÛ th\u1ec3 liÍn k\u1ebft v\u1edbi c·c ng‚n h‡ng nh\u01b0 th\u1ebf n‡o...
+INFO:neo4j_rag_engine:   Score: 0.540
+INFO:neo4j_rag_engine:   Breakdown - Base: 0.500, Exact: 0.000, Topic: 0.000, Intent: 0.000
+INFO:neo4j_rag_engine:3. FAQ: TÙi cÛ th\u1ec3 xem l\u1ea1i danh s·ch c·c ng‚n h‡ng \u0111„ liÍn k\u1ebft \u1edf \u0111‚u...
+INFO:neo4j_rag_engine:   Score: 0.540
+INFO:neo4j_rag_engine:   Breakdown - Base: 0.500, Exact: 0.000, Topic: 0.000, Intent: 0.000
+INFO:neo4j_rag_engine:============================================================
+
+INFO:neo4j_connector:Neo4j connection closed
+
+Status: success
+Confidence: 294%
+
+FAQ Retrieved:
+  ID: FAQ_57
+  Question: T√¥i c√≥ th·ªÉ r√∫t ti·ªÅn t·ª´ t√†i kho·∫£n Mobile Money v·ªÅ t√†i kho·∫£n ng√¢n h√†ng nh∆∞ th·∫ø n√†o?...
+
+Answer Preview (first 200 chars):
+  B∆∞·ªõc 1: T·∫°i giao di·ªán ch√≠nh, ch·ªçn m·ª•c ‚ÄúR√∫t ti·ªÅn‚Äù.
+B∆∞·ªõc 2: Nh·∫≠p s·ªë ti·ªÅn c·∫ßn n·∫°p v√† nh·∫•n ""Ti·∫øp t·ª•c"".
+B∆∞·ªõc 3: M√†n h√¨nh X√°c nh·∫≠n giao d·ªãch v√† nh·∫•n "R√∫t ti·ªÅn"
+B∆∞·ªõc 4: M√†n h√¨nh nh·∫≠p OTP
+B∆∞·ªõc 5: M√†n h√¨nh x...
+
+Topics: ['R√∫t ti·ªÅn']
+
+================================================================================
+Query 2: t√¥i ƒë√£ l√†m xong 3 b∆∞·ªõc ƒë·∫ßu th√¨ l√†m g√¨ ti·∫øp theo
+================================================================================
+
+Status: no_results
+Confidence: 0%
+
+Answer Preview (first 200 chars):
+  ...
+
+================================================================================
+Query 3: ti·∫øp t·ª•c
+================================================================================
+
+Status: success
+Confidence: 100%
+
+FAQ Retrieved:
+  ID: FAQ_87
+  Question: T√¥i mua g√≥i c∆∞·ªõc l·∫ßn th·ª© nh·∫•t b√°o th·∫•t b·∫°i nh∆∞ng v·∫´n b·ªã tr·ª´ ti·ªÅn, ti·∫øp t·ª•c thanh to√°n l·∫ßn 2 th√¨ th√†n...
+
+Answer Preview (first 200 chars):
+  V·ªõi giao d·ªãch thanh to√°n kh√¥ng th√†nh c√¥ng nh∆∞ng ƒë√£ b·ªã tr·ª´ ti·ªÅn,VNPT Money v√† ng√¢n h√†ng s·∫Ω ch·ªß ƒë·ªông tra so√°t ƒë·ªÉ ho√†n ti·ªÅn v·ªÅ ngu·ªìn ti·ªÅn b·∫°n ƒë√£ s·ª≠ d·ª•ng:
++ V·ªõi ngu·ªìn ti·ªÅn v√≠ VNPT Pay/t√†i kho·∫£n Mobile Mon...
+
+Topics: ['Ho√†n ti·ªÅn']
+
+================================================================================
+Test Complete
+================================================================================

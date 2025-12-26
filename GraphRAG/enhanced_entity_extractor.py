@@ -5,8 +5,12 @@ Cải tiến từ SimpleEntityExtractor
 """
 
 import re
+import logging
 from typing import Dict, List, Tuple
 from simple_entity_extractor import SimpleEntityExtractor
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class EnhancedEntityExtractor(SimpleEntityExtractor):
@@ -98,6 +102,43 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"change\s+password", "Đổi mật khẩu"),
         ]
 
+        # THÊM: Regex patterns cho Action detection (NEW!)
+        self.action_patterns_regex = [
+            (r"hủy\s+(liên\s*kết)", "Hủy liên kết"),
+            (r"liên\s*kết\s+(lại|lại\s+ngân\s*hàng)", "Liên kết lại"),
+            (r"kiểm\s*tra\s+trạng\s*thái", "Kiểm tra trạng thái"),
+            (r"tra\s*cứu\s+trạng\s*thái", "Kiểm tra trạng thái"),
+            (r"liên\s*hệ\s+(hỗ\s*trợ|hotline)", "Liên hệ hỗ trợ"),
+            (r"gọi\s+hotline", "Liên hệ hỗ trợ"),
+            (r"tra\s*soát", "Tra soát"),
+            (r"yêu\s*cầu\s+tra\s*soát", "Tra soát"),
+        ]
+
+        # THÊM: Regex patterns cho Status detection (NEW!)
+        self.status_patterns_regex = [
+            (r"đang\s+xử\s+lý", "Đang xử lý"),
+            (r"chờ\s+xác\s+nhận", "Chờ xác nhận"),
+            (r"thất\s+bại", "Thất bại"),
+            (r"thành\s+công", "Thành công"),
+        ]
+
+        # THÊM: Regex patterns cho Fee detection (NEW! - IMPORTANT)
+        self.fee_patterns_regex = [
+            (r"phí\s+(rút\s+tiền|chuyển\s+tiền|nạp\s+tiền|dịch\s+vụ)", "phí"),
+            (r"biểu\s+phí", "biểu phí"),
+            (r"bảng\s+phí", "bảng phí"),
+            (r"mất\s+phí", "phí"),
+            (r"tính\s+phí", "phí"),
+        ]
+
+        # THÊM: Regex patterns cho Limit detection (NEW!)
+        self.limit_patterns_regex = [
+            (r"hạn\s+mức", "hạn mức"),
+            (r"giới\s+hạn", "giới hạn"),
+            (r"số\s+tiền\s+tối\s+đa", "hạn mức"),
+            (r"tối\s+đa", "tối đa"),
+        ]
+
         # THÊM: Contextual rules
         self.contextual_rules = {
             # Nếu có "chuyển tiền" + "chưa" → Error: chưa nhận được
@@ -111,11 +152,13 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
 
     def extract_with_confidence(self, query: str) -> Tuple[Dict[str, List[str]], float]:
         """
-        Extract entities với confidence score
+        HYBRID extraction: Pattern-first, LLM fallback
 
         Returns:
             (entities_dict, confidence_score)
         """
+        import config
+
         # Step 1: Pattern-based extraction (from parent)
         entities = self.extract(query)
 
@@ -134,11 +177,39 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
         # Step 6: Calculate confidence
         confidence = self._calculate_confidence(query, entities)
 
+        # Step 7: HYBRID - LLM fallback if needed
+        if config.ENABLE_LLM_FALLBACK:
+            should_use_llm, reason = self._should_use_llm_fallback(query, entities, confidence)
+
+            if should_use_llm:
+                logger.info(f"🤖 LLM fallback triggered: {reason}")
+                logger.info(f"   Pattern confidence: {confidence:.2%}")
+
+                try:
+                    llm_entities = self._extract_with_llm(query)
+
+                    if llm_entities:
+                        # Merge LLM results with pattern results (LLM takes priority)
+                        entities = self._merge_llm_results(entities, llm_entities)
+                        confidence = 0.95  # High confidence from LLM
+                        logger.info(f"   ✅ LLM extraction successful")
+                        logger.info(f"   LLM entities: {llm_entities}")
+                except Exception as e:
+                    logger.error(f"   ❌ LLM fallback failed: {e}")
+                    logger.info(f"   → Using pattern-based results (confidence: {confidence:.2%})")
+
         return entities, confidence
 
     def _extract_with_regex(self, query: str) -> Dict[str, List[str]]:
-        """Extract entities using regex patterns"""
-        entities = {"Error": [], "Topic": []}
+        """Extract entities using regex patterns (EXPANDED for all entity types)"""
+        entities = {
+            "Error": [],
+            "Topic": [],
+            "Action": [],
+            "Status": [],
+            "Fee": [],
+            "Limit": []
+        }
 
         query_lower = query.lower()
 
@@ -153,6 +224,30 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             if re.search(pattern, query_lower):
                 if topic_name not in entities["Topic"]:
                     entities["Topic"].append(topic_name)
+
+        # Check action regex patterns (NEW!)
+        for pattern, action_name in self.action_patterns_regex:
+            if re.search(pattern, query_lower):
+                if action_name not in entities["Action"]:
+                    entities["Action"].append(action_name)
+
+        # Check status regex patterns (NEW!)
+        for pattern, status_name in self.status_patterns_regex:
+            if re.search(pattern, query_lower):
+                if status_name not in entities["Status"]:
+                    entities["Status"].append(status_name)
+
+        # Check fee regex patterns (NEW! - IMPORTANT)
+        for pattern, fee_name in self.fee_patterns_regex:
+            if re.search(pattern, query_lower):
+                if fee_name not in entities["Fee"]:
+                    entities["Fee"].append(fee_name)
+
+        # Check limit regex patterns (NEW!)
+        for pattern, limit_name in self.limit_patterns_regex:
+            if re.search(pattern, query_lower):
+                if limit_name not in entities["Limit"]:
+                    entities["Limit"].append(limit_name)
 
         return entities
 
@@ -215,8 +310,18 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
                 entities["Topic"].append("Chuyển tiền")
 
         # Rule: Nếu query có "nạp tiền" mà không có Topic, thêm vào
+        # CRITICAL FIX: Only add generic "Nạp tiền" if no specific "nạp tiền" topic exists
         if "nạp tiền" in query_lower or "nạp" in query_lower:
-            if "Nạp tiền" not in entities.get("Topic", []):
+            existing_topics = entities.get("Topic", [])
+            # Check if any existing topic already contains "nạp tiền" (more specific)
+            has_specific_nap_tien = any("nạp tiền" in t.lower() or "nạp" in t.lower()
+                                       for t in existing_topics if t != "Nạp tiền")
+
+            # Debug log
+            if has_specific_nap_tien:
+                logger.debug(f"   Skipping generic 'Nạp tiền' - found specific topic: {existing_topics}")
+
+            if not has_specific_nap_tien and "Nạp tiền" not in existing_topics:
                 if "Topic" not in entities:
                     entities["Topic"] = []
                 entities["Topic"].append("Nạp tiền")
@@ -285,6 +390,171 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             confidence += 0.1
 
         return min(confidence, 1.0)  # Cap at 1.0
+
+    def _should_use_llm_fallback(
+        self,
+        query: str,
+        entities: Dict[str, List[str]],
+        confidence: float
+    ) -> Tuple[bool, str]:
+        """
+        Determine if LLM fallback is needed
+
+        Returns:
+            (should_use_llm: bool, reason: str)
+        """
+        import config
+
+        query_lower = query.lower()
+
+        # Trigger 1: Low confidence
+        if confidence < config.LLM_FALLBACK_THRESHOLD:
+            return True, f"low_confidence ({confidence:.2%} < {config.LLM_FALLBACK_THRESHOLD:.2%})"
+
+        # Trigger 2: Question keywords but no relevant answer entities
+        if config.LLM_FALLBACK_FOR_QUESTIONS:
+            if self._is_question_query(query) and not self._has_answer_entities(entities):
+                return True, "question_without_answer_entities"
+
+        # Trigger 3: Ambiguous queries
+        if config.LLM_FALLBACK_FOR_AMBIGUOUS:
+            if self._is_ambiguous(query, entities):
+                return True, "ambiguous_query"
+
+        # Trigger 4: Critical entities missing
+        if self._missing_critical_entities(query, entities):
+            return True, "missing_critical_entities"
+
+        return False, "pattern_sufficient"
+
+    def _is_question_query(self, query: str) -> bool:
+        """Check if query is asking a question"""
+        question_keywords = [
+            "như thế nào", "làm sao", "thế nào",
+            "bao nhiêu", "là gì", "tại sao", "khi nào",
+            "ở đâu", "ai", "có", "phải", "được"
+        ]
+        query_lower = query.lower()
+        return any(kw in query_lower for kw in question_keywords)
+
+    def _has_answer_entities(self, entities: Dict) -> bool:
+        """Check if we extracted answer-relevant entities"""
+        # Has action, fee, limit, or error entities
+        answer_entity_types = ["Action", "Fee", "Limit", "Error", "Status"]
+        return any(entities.get(entity_type) for entity_type in answer_entity_types)
+
+    def _is_ambiguous(self, query: str, entities: Dict) -> bool:
+        """Check if query/entities are ambiguous"""
+        query_lower = query.lower()
+
+        # "hủy" without specific action
+        if "hủy" in query_lower and not entities.get("Action"):
+            return True
+
+        # Generic pronouns without context
+        generic_words = ["này", "đó", "kia", "ấy"]
+        if any(w in query_lower for w in generic_words):
+            if len(entities.get("Action", [])) == 0 and len(entities.get("Topic", [])) == 0:
+                return True
+
+        return False
+
+    def _missing_critical_entities(self, query: str, entities: Dict) -> bool:
+        """Check if critical entities are missing"""
+        query_lower = query.lower()
+
+        # Query mentions fee but Fee not extracted
+        fee_keywords = ["phí", "bao nhiêu", "tốn", "chi phí", "mất tiền"]
+        if any(kw in query_lower for kw in fee_keywords):
+            if not entities.get("Fee"):
+                return True
+
+        # Query mentions limit but Limit not extracted
+        limit_keywords = ["hạn mức", "tối đa", "giới hạn", "tối thiểu"]
+        if any(kw in query_lower for kw in limit_keywords):
+            if not entities.get("Limit"):
+                return True
+
+        # Query mentions action verbs but Action not extracted
+        action_keywords = ["làm", "thực hiện", "tiến hành", "xử lý"]
+        if any(kw in query_lower for kw in action_keywords):
+            if not entities.get("Action"):
+                return True
+
+        return False
+
+    def _extract_with_llm(self, query: str) -> Dict[str, List[str]]:
+        """
+        Extract entities using LLM (same prompt as document extraction)
+
+        Returns:
+            Dictionary of entities
+        """
+        try:
+            from llm_entity_extractor import LLMEntityExtractor
+
+            # Initialize LLM extractor (reuse existing instance if possible)
+            if not hasattr(self, '_llm_extractor'):
+                self._llm_extractor = LLMEntityExtractor()
+
+            # Extract using same method as document extraction
+            result = self._llm_extractor.extract_entities_and_relationships(
+                question=query,
+                answer="",  # Empty for query extraction
+                section=""  # Empty for query
+            )
+
+            # Return only entities (ignore relationships for query extraction)
+            return result.get("entities", {})
+
+        except Exception as e:
+            logger.error(f"LLM extraction failed: {e}")
+            return {}
+
+    def _merge_llm_results(
+        self,
+        pattern_entities: Dict[str, List[str]],
+        llm_entities: Dict[str, List[str]]
+    ) -> Dict[str, List[str]]:
+        """
+        Merge pattern and LLM results (LLM takes priority)
+
+        Strategy:
+        - Keep all LLM entities (they are more accurate)
+        - Add pattern entities that LLM didn't find
+        - Remove duplicates
+        """
+        merged = {}
+
+        # Get all entity types from both
+        all_types = set(pattern_entities.keys()) | set(llm_entities.keys())
+
+        for entity_type in all_types:
+            # Skip special flags
+            if entity_type == "out_of_scope":
+                merged[entity_type] = pattern_entities.get(entity_type, False)
+                continue
+
+            # Start with LLM entities (higher priority)
+            llm_vals = llm_entities.get(entity_type, [])
+            pattern_vals = pattern_entities.get(entity_type, [])
+
+            # Combine and deduplicate (case-insensitive)
+            combined = list(llm_vals)  # Start with LLM
+
+            for pv in pattern_vals:
+                # Add pattern value if not already in LLM results
+                # CRITICAL FIX: Also skip if pattern value is a substring of any LLM value
+                # (e.g., don't add "Nạp tiền" if LLM found "Hủy dịch vụ nạp tiền tự động")
+                is_duplicate = any(pv.lower() == lv.lower() for lv in llm_vals)
+                is_substring = any(pv.lower() in lv.lower() for lv in llm_vals if len(pv) < len(lv))
+
+                if not is_duplicate and not is_substring:
+                    combined.append(pv)
+
+            merged[entity_type] = combined
+
+        return merged
 
 
 # ============================================

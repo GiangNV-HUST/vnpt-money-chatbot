@@ -75,14 +75,28 @@ CACHE_ENABLED = True
 CACHE_SIZE = 100  # Number of queries to cache
 
 # Entity Extraction
-ENTITY_EXTRACTION_METHOD = "llm"  # Options: "rule_based", "llm", "hybrid"
+ENTITY_EXTRACTION_METHOD = "hybrid"  # Options: "pattern", "llm", "hybrid"
 MIN_ENTITY_CONFIDENCE = 0.6
 USE_LLM_EXTRACTION = True  # Use LLM for entity and relationship extraction
+
+# Hybrid Entity Extraction (Pattern + LLM Fallback)
+ENABLE_LLM_FALLBACK = True  # Enable LLM fallback when pattern-based confidence is low
+LLM_FALLBACK_THRESHOLD = 0.5  # Use LLM if pattern confidence < 50%
+LLM_FALLBACK_FOR_QUESTIONS = True  # Always use LLM for question-type queries with low entity coverage
+LLM_FALLBACK_FOR_AMBIGUOUS = True  # Use LLM for ambiguous queries
 
 # Response Generation
 RESPONSE_LANGUAGE = "vi"  # Vietnamese
 INCLUDE_SOURCES = True  # Include source references in response
 MAX_RESPONSE_LENGTH = 500  # Maximum characters in response
+
+# Conversation Memory Configuration (LangChain)
+ENABLE_LANGCHAIN_MEMORY = True  # Use LangChain ConversationSummaryBufferMemory
+MEMORY_TYPE = "summary_buffer"  # Options: "buffer", "summary", "summary_buffer"
+MEMORY_MAX_TOKEN_LIMIT = 2000  # Max tokens to keep in buffer before summarizing
+MEMORY_RETURN_MESSAGES = True  # Return as message objects instead of string
+MEMORY_AI_PREFIX = "VNPT Assistant"  # AI message prefix
+MEMORY_HUMAN_PREFIX = "Khách hàng"  # Human message prefix
 
 # Create directories if they don't exist
 DATA_DIR.mkdir(exist_ok=True)

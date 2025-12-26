@@ -93,6 +93,95 @@ class SimpleEntityExtractor:
             "Tra soát", "Biểu phí"
         ]
 
+        # Action patterns (IMPORTANT: Actions người dùng cần thực hiện)
+        self.actions = {
+            "Nạp tiền": ["nạp tiền", "nạp"],
+            "Rút tiền": ["rút tiền", "rút"],
+            "Chuyển tiền": ["chuyển tiền", "chuyển khoản"],
+            "Liên kết ngân hàng": ["liên kết ngân hàng", "liên kết bank"],
+            "Hủy liên kết": ["hủy liên kết", "hủy link", "gỡ liên kết"],
+            "Liên kết lại": ["liên kết lại", "link lại"],
+            "Kiểm tra trạng thái": ["kiểm tra trạng thái", "tra cứu trạng thái", "xem trạng thái"],
+            "Kiểm tra số dư": ["kiểm tra số dư", "xem số dư"],
+            "Liên hệ hỗ trợ": ["liên hệ hỗ trợ", "liên hệ hotline", "gọi hotline"],
+            "Tra soát": ["tra soát", "yêu cầu tra soát"],
+            "Đăng ký": ["đăng ký", "register"],
+            "Cập nhật thông tin": ["cập nhật", "update"],
+            "Định danh": ["định danh", "ekyc", "xác minh"],
+        }
+
+        # Status patterns (Trạng thái giao dịch/tài khoản)
+        self.statuses = [
+            "Thành công",
+            "Đang xử lý",
+            "Thất bại",
+            "Chờ xác nhận",
+            "Đã kích hoạt",
+            "Chưa kích hoạt",
+            "Hoàn thành",
+            "Bị từ chối",
+        ]
+
+        # TimeFrame patterns (Khung thời gian)
+        self.timeframes = [
+            "2 ngày làm việc",
+            "3 ngày làm việc",
+            "45-60 ngày làm việc",
+            "ngay lập tức",
+            "trong vòng 24h",
+            "trong ngày",
+        ]
+
+        # Document patterns (Giấy tờ)
+        self.documents = [
+            "CCCD", "CMND", "Hộ chiếu",
+            "CCCD gắn chíp", "Căn cước công dân",
+            "Chứng minh nhân dân", "Giấy tờ"
+        ]
+
+        # AccountType patterns (Loại tài khoản)
+        self.account_types = [
+            "Tài khoản ví",
+            "Tài khoản ngân hàng",
+            "Thẻ nội địa",
+            "Số tài khoản",
+            "Số thẻ",
+            "Tài khoản Mobile Money",
+        ]
+
+        # UIElement patterns (Phần tử giao diện)
+        self.ui_elements = [
+            "Cá nhân", "Ngân hàng liên kết", "Chuyển tiền",
+            "Trợ giúp", "Qua số tài khoản/số thẻ",
+            "Lịch sử giao dịch", "Nạp tiền", "Rút tiền"
+        ]
+
+        # ContactChannel patterns (Kênh liên hệ)
+        self.contact_channels = [
+            "Hotline", "Trợ giúp", "Bộ phận hỗ trợ",
+            "CSKH", "Chăm sóc khách hàng"
+        ]
+
+        # Fee patterns (Phí dịch vụ) - IMPORTANT!
+        self.fee_keywords = [
+            "phí", "biểu phí", "bảng phí", "chính sách phí",
+            "phí dịch vụ", "chi phí", "mất phí", "tính phí"
+        ]
+
+        # Limit patterns (Hạn mức)
+        self.limit_keywords = [
+            "hạn mức", "giới hạn", "tối đa", "tối thiểu",
+            "số tiền tối đa", "số lần", "hạn mức giao dịch"
+        ]
+
+        # Requirement patterns (Điều kiện)
+        self.requirements = [
+            "Đăng ký dịch vụ thanh toán trực tuyến",
+            "Có số dư tối thiểu",
+            "Thông tin trùng khớp",
+            "Định danh thành công",
+        ]
+
     def is_out_of_scope(self, query: str) -> bool:
         """
         Check if query is out of scope (not related to VNPT Money)
@@ -130,16 +219,27 @@ class SimpleEntityExtractor:
             query: User query string
 
         Returns:
-            Dict of entity types and extracted values
+            Dict of entity types and extracted values (MATCHES document extraction structure)
         """
         query_lower = query.lower().strip()
 
+        # Initialize with ALL entity types (same as LLM document extraction)
         entities = {
             "Topic": [],
             "Service": [],
             "Bank": [],
             "Error": [],
+            "Action": [],
+            "Requirement": [],
             "Feature": [],
+            "TimeFrame": [],
+            "Status": [],
+            "Document": [],
+            "AccountType": [],
+            "UIElement": [],
+            "ContactChannel": [],
+            "Fee": [],
+            "Limit": [],
             "out_of_scope": self.is_out_of_scope(query)  # Add flag
         }
 
@@ -176,6 +276,66 @@ class SimpleEntityExtractor:
         for feature in self.features:
             if feature.lower() in query_lower:
                 entities["Feature"].append(feature)
+
+        # Extract actions (NEW!)
+        sorted_actions = sorted(
+            self.actions.items(),
+            key=lambda x: max(len(p) for p in x[1]),
+            reverse=True
+        )
+        for action, patterns in sorted_actions:
+            for pattern in patterns:
+                if pattern.lower() in query_lower:
+                    entities["Action"].append(action)
+                    break
+
+        # Extract statuses (NEW!)
+        for status in self.statuses:
+            if status.lower() in query_lower:
+                entities["Status"].append(status)
+
+        # Extract timeframes (NEW!)
+        for timeframe in self.timeframes:
+            if timeframe.lower() in query_lower:
+                entities["TimeFrame"].append(timeframe)
+
+        # Extract documents (NEW!)
+        for doc in self.documents:
+            if doc.lower() in query_lower:
+                entities["Document"].append(doc)
+
+        # Extract account types (NEW!)
+        for account_type in self.account_types:
+            if account_type.lower() in query_lower:
+                entities["AccountType"].append(account_type)
+
+        # Extract UI elements (NEW!)
+        for ui_elem in self.ui_elements:
+            if ui_elem.lower() in query_lower:
+                entities["UIElement"].append(ui_elem)
+
+        # Extract contact channels (NEW!)
+        for channel in self.contact_channels:
+            if channel.lower() in query_lower:
+                entities["ContactChannel"].append(channel)
+
+        # Extract requirements (NEW!)
+        for req in self.requirements:
+            if req.lower() in query_lower:
+                entities["Requirement"].append(req)
+
+        # Extract fees (NEW! - IMPORTANT)
+        for fee_keyword in self.fee_keywords:
+            if fee_keyword.lower() in query_lower:
+                # Lấy toàn bộ context xung quanh keyword "phí"
+                entities["Fee"].append(fee_keyword)
+                break  # Chỉ thêm 1 lần
+
+        # Extract limits (NEW!)
+        for limit_keyword in self.limit_keywords:
+            if limit_keyword.lower() in query_lower:
+                entities["Limit"].append(limit_keyword)
+                break  # Chỉ thêm 1 lần
 
         # Remove duplicates and empties (skip boolean out_of_scope flag)
         for key in entities:

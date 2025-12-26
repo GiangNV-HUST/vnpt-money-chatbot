@@ -97,10 +97,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def load_chatbot():
-    """Load chatbot instance (cached)"""
-    return GraphRAGChatbot()
+def get_chatbot():
+    """Get or create chatbot instance for this session"""
+    # CRITICAL FIX: Use session_state instead of cache_resource
+    # cache_resource shares ONE instance across all users/sessions
+    # session_state creates separate instance per user session
+    if "chatbot" not in st.session_state:
+        st.session_state.chatbot = GraphRAGChatbot()
+    return st.session_state.chatbot
 
 
 def format_confidence(confidence):
@@ -200,7 +204,7 @@ def main():
             st.session_state.avg_confidence = 0
 
             # Clear chatbot history
-            chatbot = load_chatbot()
+            chatbot = get_chatbot()
             chatbot.clear_history()
 
             st.rerun()
@@ -228,9 +232,12 @@ def main():
     if "avg_confidence" not in st.session_state:
         st.session_state.avg_confidence = 0
 
-    # Load chatbot
-    with st.spinner("🔄 Đang khởi tạo hệ thống..."):
-        chatbot = load_chatbot()
+    # Get chatbot for this session (show spinner only on first load)
+    if "chatbot" not in st.session_state:
+        with st.spinner("🔄 Đang khởi tạo hệ thống..."):
+            chatbot = get_chatbot()
+    else:
+        chatbot = get_chatbot()
 
     # Display chat history
     for message in st.session_state.messages:

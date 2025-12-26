@@ -470,13 +470,33 @@ Tóm tắt (bằng tiếng Việt, 2-3 câu):"""
         text_lower = text.lower()
 
         # Common topics/actions in VNPT services
+        # IMPORTANT: More SPECIFIC patterns FIRST (checked in order)
         topic_keywords = [
-            # Transaction types
+            # Specific cancellation/service management (check before generic transactions)
+            ("hủy nạp tiền tự động", ["hủy dịch vụ nạp tiền tự động", "hủy nạp tiền tự động"]),
+            ("hủy thanh toán tự động", ["hủy thanh toán tự động", "hủy dịch vụ thanh toán"]),
+            ("đăng ký nạp tiền tự động", ["đăng ký nạp tiền tự động", "thiết lập nạp tự động"]),
+
+            # Specific ticket types (check before generic "mua vé")
+            ("mua vé máy bay", ["mua vé máy bay", "đặt vé máy bay"]),
+            ("mua vé tàu", ["mua vé tàu", "đặt vé tàu"]),
+            ("mua vé vui chơi", ["mua vé vui chơi", "mua vé giải trí"]),
+
+            # Specific deposit/recharge types
+            ("nạp tiền điện thoại", ["nạp tiền điện thoại", "nạp cước"]),
+            ("mua mã thẻ", ["mua mã thẻ", "mua thẻ cào"]),
+
+            # Specific payment types
+            ("thanh toán hóa đơn", ["thanh toán hóa đơn", "thanh toán cước"]),
+            ("thanh toán khoản vay", ["thanh toán khoản vay", "thanh toán vay"]),
+
+            # Generic transaction types (fallback)
             ("rút tiền", ["rút tiền", "rút", "withdraw"]),
             ("nạp tiền", ["nạp tiền", "nạp", "deposit", "top-up"]),
             ("chuyển tiền", ["chuyển tiền", "chuyển khoản", "transfer"]),
             ("hoàn tiền", ["hoàn tiền", "hoàn trả", "refund"]),
             ("thanh toán", ["thanh toán", "payment"]),
+            ("mua vé", ["mua vé", "đặt vé"]),
 
             # Account operations
             ("đăng ký", ["đăng ký", "register", "sign up"]),
