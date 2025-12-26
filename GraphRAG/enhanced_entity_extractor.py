@@ -135,6 +135,7 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"mở\s+tài\s+khoản", "Mở tài khoản"),
             (r"xem\s+lịch\s+sử\s+giao\s+dịch", "Xem lịch sử giao dịch"),
             (r"bấm\s+vào\s+nút\s+xác\s+nhận", "Bấm vào nút Xác nhận"),
+            (r"(?:để\s+)?cài\s+đặt", "Cài đặt"),  # From gap analysis - "để cài đặt"
         ]
 
         # THÊM: Regex patterns cho Status detection (NEW!)
@@ -279,6 +280,9 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"ví\s+điện\s+tử", "Ví điện tử"),
             (r"app\s+vnpt", "VNPT Money"),
             (r"ứng\s+dụng\s+vnpt", "VNPT Money"),
+            # Context-based patterns (when query is about VNPT Money features but doesn't mention it explicitly)
+            (r"(?=.*liên\s+kết)(?=.*ngân\s+hàng)", "VNPT Money"),  # "liên kết ngân hàng" context
+            (r"(?=.*mở)(?=.*tài\s+khoản)(?!.*ngân\s+hàng)", "VNPT Money"),  # "mở tài khoản" (not bank account)
         ]
 
         # THÊM: Expanded Bank patterns (IMPROVE EXISTING - specific patterns for major banks)
