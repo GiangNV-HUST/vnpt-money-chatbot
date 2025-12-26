@@ -145,6 +145,155 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"tối\s+đa", "tối đa"),
         ]
 
+        # THÊM: Regex patterns cho Requirement detection (NEW! - PRIORITY 1)
+        self.requirement_patterns_regex = [
+            (r"cần\s+(có|gì|phải|làm|những gì)", "điều kiện cần thiết"),
+            (r"yêu\s*cầu", "yêu cầu"),
+            (r"phải\s+có", "điều kiện"),
+            (r"điều\s*kiện", "điều kiện"),
+            (r"bắt\s+buộc", "bắt buộc"),
+            (r"cần\s+thiết", "cần thiết"),
+            (r"đòi\s+hỏi", "yêu cầu"),
+        ]
+
+        # THÊM: Regex patterns cho Feature detection (NEW! - PRIORITY 1)
+        self.feature_patterns_regex = [
+            (r"\bqr\b", "QR"),
+            (r"mã\s+qr", "QR"),
+            (r"\bnfc\b", "NFC"),
+            (r"\botp\b", "OTP"),
+            (r"mã\s+otp", "OTP"),
+            (r"tra\s*soát", "tra soát"),
+            (r"lịch\s+sử\s+(giao\s+dịch|nạp\s+tiền)", "lịch sử giao dịch"),
+            (r"sinh\s*trắc\s*học", "sinh trắc học"),
+            (r"ekyc", "eKYC"),
+            (r"xác\s+thực\s+2\s+lớp", "2FA"),
+            (r"2fa", "2FA"),
+            (r"thông\s+báo\s+push", "push notification"),
+            (r"vân\s+tay", "vân tay"),
+            (r"khuôn\s+mặt", "nhận diện khuôn mặt"),
+        ]
+
+        # THÊM: Regex patterns cho UIElement detection (NEW! - PRIORITY 1 - CRITICAL!)
+        self.ui_element_patterns_regex = [
+            # Menu tabs
+            (r"(tab|mục)\s+cá\s+nhân", "Cá nhân"),
+            (r"(tab|mục)\s+ngân\s+hàng\s+liên\s+kết", "Ngân hàng liên kết"),
+            (r"(tab|mục)\s+chuyển\s+tiền", "Chuyển tiền"),
+            (r"(tab|mục)\s+nạp\s+tiền", "Nạp tiền"),
+            (r"(tab|mục)\s+rút\s+tiền", "Rút tiền"),
+            (r"(tab|mục)\s+thanh\s+toán", "Thanh toán"),
+            (r"(tab|mục)\s+lịch\s+sử", "Lịch sử"),
+            (r"(tab|mục)\s+cài\s+đặt", "Cài đặt"),
+            (r"(tab|mục)\s+trợ\s+giúp", "Trợ giúp"),
+
+            # Buttons
+            (r"nút\s+(chuyển\s+tiền|nạp\s+tiền|rút\s+tiền|xác\s+nhận|hủy)", "nút"),
+            (r"(nhấn|bấm|chọn)\s+vào", "action button"),
+
+            # Fields
+            (r"(ô|trường)\s+nhập", "input field"),
+            (r"nhập\s+(số\s+tiền|số\s+điện\s+thoại|tài\s+khoản)", "input field"),
+
+            # Icons
+            (r"biểu\s+tượng", "icon"),
+            (r"icon", "icon"),
+        ]
+
+        # THÊM: Regex patterns cho TimeFrame detection (NEW! - PRIORITY 2)
+        self.timeframe_patterns_regex = [
+            (r"ngày\s+làm\s+việc", "ngày làm việc"),
+            (r"ngay\s+lập\s+tức", "ngay lập tức"),
+            (r"trong\s+vòng\s+\d+\s+(ngày|giờ|phút)", "trong vòng"),
+            (r"24\s*\/\s*7", "24/7"),
+            (r"(hàng\s+ngày|mỗi\s+ngày)", "hàng ngày"),
+            (r"cuối\s+tuần", "cuối tuần"),
+            (r"(thứ\s+[2-7]|chủ\s+nhật)", "ngày trong tuần"),
+            (r"(sáng|chiều|tối)", "khung giờ trong ngày"),
+        ]
+
+        # THÊM: Regex patterns cho Document detection (NEW! - PRIORITY 2)
+        self.document_patterns_regex = [
+            (r"\bcccd\b", "CCCD"),
+            (r"căn\s+cước\s+công\s+dân", "CCCD"),
+            (r"cccd\s+gắn\s+chip", "CCCD gắn chip"),
+            (r"\bcmnd\b", "CMND"),
+            (r"chứng\s+minh\s+nhân\s+dân", "CMND"),
+            (r"hộ\s+chiếu", "Hộ chiếu"),
+            (r"passport", "Hộ chiếu"),
+            (r"giấy\s+tờ\s+tùy\s+thân", "giấy tờ tùy thân"),
+            (r"bằng\s+lái\s+xe", "bằng lái xe"),
+        ]
+
+        # THÊM: Regex patterns cho AccountType detection (NEW! - PRIORITY 2)
+        self.account_type_patterns_regex = [
+            (r"tài\s+khoản\s+ví", "tài khoản ví"),
+            (r"ví\s+điện\s+tử", "ví điện tử"),
+            (r"tài\s+khoản\s+ngân\s+hàng", "tài khoản ngân hàng"),
+            (r"thẻ\s+nội\s+địa", "thẻ nội địa"),
+            (r"thẻ\s+atm", "thẻ ATM"),
+            (r"thẻ\s+tín\s+dụng", "thẻ tín dụng"),
+            (r"thẻ\s+ghi\s+nợ", "thẻ ghi nợ"),
+            (r"tài\s+khoản\s+thanh\s+toán", "tài khoản thanh toán"),
+        ]
+
+        # THÊM: Regex patterns cho ContactChannel detection (NEW! - PRIORITY 3)
+        self.contact_channel_patterns_regex = [
+            (r"hotline", "Hotline"),
+            (r"(gọi|điện)\s+(hỗ\s+trợ|tổng\s+đài)", "Hotline"),
+            (r"trợ\s+giúp", "Trợ giúp"),
+            (r"hỗ\s+trợ\s+trực\s+tuyến", "hỗ trợ trực tuyến"),
+            (r"chat\s+(hỗ\s+trợ|support)", "chat support"),
+            (r"email\s+(hỗ\s+trợ|support)", "email support"),
+            (r"trung\s+tâm\s+hỗ\s+trợ", "trung tâm hỗ trợ"),
+        ]
+
+        # THÊM: Expanded Service patterns (IMPROVE EXISTING - specific patterns)
+        self.service_patterns_regex = [
+            (r"vnpt\s+money", "VNPT Money"),
+            (r"vnpt\s+pay", "VNPT Pay"),
+            (r"mobile\s+banking", "Mobile Banking"),
+            (r"internet\s+banking", "Internet Banking"),
+            (r"ví\s+điện\s+tử", "Ví điện tử"),
+            (r"app\s+vnpt", "VNPT Money"),
+            (r"ứng\s+dụng\s+vnpt", "VNPT Money"),
+        ]
+
+        # THÊM: Expanded Bank patterns (IMPROVE EXISTING - specific patterns for major banks)
+        self.bank_patterns_regex = [
+            (r"vietinbank", "Vietinbank"),
+            (r"vietcombank", "Vietcombank"),
+            (r"\bbidv\b", "BIDV"),
+            (r"techcombank", "Techcombank"),
+            (r"\bacb\b", "ACB"),
+            (r"vpbank", "VPBank"),
+            (r"mb\s+bank", "MB Bank"),
+            (r"sacombank", "Sacombank"),
+            (r"\bvib\b", "VIB"),
+            (r"hdbank", "HDBank"),
+            (r"tpbank", "TPBank"),
+            (r"\bocb\b", "OCB"),
+            (r"agribank", "Agribank"),
+            (r"seabank", "SeABank"),
+            (r"lienvietpostbank", "LienVietPostBank"),
+            (r"\bshb\b", "SHB"),
+        ]
+
+        # THÊM: Expanded Action patterns (IMPROVE EXISTING - more common actions)
+        # Note: self.action_patterns_regex already exists, so we'll add to it
+        self.action_patterns_regex.extend([
+            (r"nhập\s+số\s+tiền", "Nhập số tiền"),
+            (r"chọn\s+ngân\s+hàng", "Chọn ngân hàng"),
+            (r"chọn\s+(loại|dịch\s+vụ)", "Chọn dịch vụ"),
+            (r"xác\s+nhận\s+giao\s+dịch", "Xác nhận giao dịch"),
+            (r"nhập\s+mã\s+otp", "Nhập mã OTP"),
+            (r"nhập\s+số\s+điện\s+thoại", "Nhập số điện thoại"),
+            (r"nhập\s+tài\s+khoản", "Nhập tài khoản"),
+            (r"bấm\s+(nút|chọn)", "Bấm nút"),
+            (r"vào\s+mục", "Vào mục"),
+            (r"chuyển\s+sang\s+(tab|mục)", "Chuyển tab"),
+        ])
+
         # THÊM: Contextual rules
         self.contextual_rules = {
             # Nếu có "chuyển tiền" + "chưa" → Error: chưa nhận được
@@ -214,7 +363,16 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             "Action": [],
             "Status": [],
             "Fee": [],
-            "Limit": []
+            "Limit": [],
+            "Requirement": [],
+            "Feature": [],
+            "UIElement": [],
+            "TimeFrame": [],
+            "Document": [],
+            "AccountType": [],
+            "ContactChannel": [],
+            "Service": [],
+            "Bank": []
         }
 
         query_lower = query.lower()
@@ -254,6 +412,60 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             if re.search(pattern, query_lower):
                 if limit_name not in entities["Limit"]:
                     entities["Limit"].append(limit_name)
+
+        # Check requirement regex patterns (NEW! - PRIORITY 1)
+        for pattern, requirement_name in self.requirement_patterns_regex:
+            if re.search(pattern, query_lower):
+                if requirement_name not in entities["Requirement"]:
+                    entities["Requirement"].append(requirement_name)
+
+        # Check feature regex patterns (NEW! - PRIORITY 1)
+        for pattern, feature_name in self.feature_patterns_regex:
+            if re.search(pattern, query_lower):
+                if feature_name not in entities["Feature"]:
+                    entities["Feature"].append(feature_name)
+
+        # Check UI element regex patterns (NEW! - PRIORITY 1 - CRITICAL!)
+        for pattern, ui_name in self.ui_element_patterns_regex:
+            if re.search(pattern, query_lower):
+                if ui_name not in entities["UIElement"]:
+                    entities["UIElement"].append(ui_name)
+
+        # Check timeframe regex patterns (NEW! - PRIORITY 2)
+        for pattern, timeframe_name in self.timeframe_patterns_regex:
+            if re.search(pattern, query_lower):
+                if timeframe_name not in entities["TimeFrame"]:
+                    entities["TimeFrame"].append(timeframe_name)
+
+        # Check document regex patterns (NEW! - PRIORITY 2)
+        for pattern, document_name in self.document_patterns_regex:
+            if re.search(pattern, query_lower):
+                if document_name not in entities["Document"]:
+                    entities["Document"].append(document_name)
+
+        # Check account type regex patterns (NEW! - PRIORITY 2)
+        for pattern, account_type_name in self.account_type_patterns_regex:
+            if re.search(pattern, query_lower):
+                if account_type_name not in entities["AccountType"]:
+                    entities["AccountType"].append(account_type_name)
+
+        # Check contact channel regex patterns (NEW! - PRIORITY 3)
+        for pattern, channel_name in self.contact_channel_patterns_regex:
+            if re.search(pattern, query_lower):
+                if channel_name not in entities["ContactChannel"]:
+                    entities["ContactChannel"].append(channel_name)
+
+        # Check service regex patterns (IMPROVED!)
+        for pattern, service_name in self.service_patterns_regex:
+            if re.search(pattern, query_lower):
+                if service_name not in entities["Service"]:
+                    entities["Service"].append(service_name)
+
+        # Check bank regex patterns (IMPROVED!)
+        for pattern, bank_name in self.bank_patterns_regex:
+            if re.search(pattern, query_lower):
+                if bank_name not in entities["Bank"]:
+                    entities["Bank"].append(bank_name)
 
         return entities
 
