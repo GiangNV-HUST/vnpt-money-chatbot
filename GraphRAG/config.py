@@ -85,6 +85,11 @@ LLM_FALLBACK_THRESHOLD = 0.45  # Use LLM if pattern confidence < 45% (lowered fr
 LLM_FALLBACK_FOR_QUESTIONS = True  # Always use LLM for question-type queries with low entity coverage
 LLM_FALLBACK_FOR_AMBIGUOUS = True  # Use LLM for ambiguous queries
 
+# LLM-First Strategy (NEW! - For maximum accuracy)
+USE_LLM_FIRST_STRATEGY = True  # Always use LLM first, regex for augmentation (80% LLM, 20% Regex)
+LLM_FIRST_REGEX_WEIGHT = 0.2  # How much weight to give regex results (0.2 = 20%)
+LLM_FIRST_VALIDATION = True  # Use regex to validate LLM results
+
 # Response Generation
 RESPONSE_LANGUAGE = "vi"  # Vietnamese
 INCLUDE_SOURCES = True  # Include source references in response

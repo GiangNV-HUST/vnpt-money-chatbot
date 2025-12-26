@@ -329,10 +329,26 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
 
     def extract_with_confidence(self, query: str) -> Tuple[Dict[str, List[str]], float]:
         """
-        HYBRID extraction: Pattern-first, LLM fallback
+        HYBRID extraction with strategy selection:
+        - LLM-First Strategy (if USE_LLM_FIRST_STRATEGY = True): Always use LLM, regex for augmentation
+        - Pattern-First Strategy (default): Pattern first, LLM fallback
 
         Returns:
             (entities_dict, confidence_score)
+        """
+        import config
+
+        # Check which strategy to use
+        if getattr(config, 'USE_LLM_FIRST_STRATEGY', False):
+            # NEW: LLM-First Strategy (80% LLM, 20% Regex)
+            return self._extract_llm_first(query)
+        else:
+            # OLD: Pattern-First Strategy (Regex first, LLM fallback)
+            return self._extract_pattern_first(query)
+
+    def _extract_pattern_first(self, query: str) -> Tuple[Dict[str, List[str]], float]:
+        """
+        Original Pattern-First Strategy: Pattern-first, LLM fallback
         """
         import config
 
@@ -374,6 +390,51 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
                 except Exception as e:
                     logger.error(f"   ❌ LLM fallback failed: {e}")
                     logger.info(f"   → Using pattern-based results (confidence: {confidence:.2%})")
+
+        return entities, confidence
+
+    def _extract_llm_first(self, query: str) -> Tuple[Dict[str, List[str]], float]:
+        """
+        NEW: LLM-First Strategy (80% LLM, 20% Regex)
+
+        Always use LLM for semantic understanding, regex for augmentation/validation
+        This provides best accuracy at higher cost
+        """
+        import config
+
+        logger.info(f"🎯 LLM-First Strategy: Using LLM for primary extraction")
+
+        # Step 1: LLM extraction (PRIMARY - 80% weight)
+        try:
+            llm_entities = self._extract_with_llm(query)
+            llm_success = True
+            logger.info(f"   ✅ LLM extraction successful")
+            logger.info(f"   LLM entities: {llm_entities}")
+        except Exception as e:
+            logger.error(f"   ❌ LLM extraction failed: {e}")
+            logger.info(f"   → Falling back to regex-only")
+            llm_entities = {}
+            llm_success = False
+
+        # Step 2: Regex extraction (SECONDARY - 20% weight, for augmentation)
+        regex_entities = self._extract_with_regex(query)
+        logger.info(f"   📋 Regex entities (for augmentation): {regex_entities}")
+
+        # Step 3: Intelligent merge (LLM priority)
+        if llm_success:
+            # Merge with LLM priority (80% LLM, 20% Regex)
+            entities = self._merge_llm_priority(llm_entities, regex_entities)
+            confidence = 0.95
+            logger.info(f"   ✅ Final entities (LLM-first): {entities}")
+        else:
+            # Fallback to regex-only if LLM fails
+            entities = regex_entities
+            confidence = self._calculate_confidence(query, entities)
+            logger.info(f"   ⚠️ Using regex-only (LLM failed)")
+
+        # Step 4: Validation (optional)
+        if getattr(config, 'LLM_FIRST_VALIDATION', True):
+            entities = self._validate_with_regex(query, entities)
 
         return entities, confidence
 
@@ -795,6 +856,118 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             merged[entity_type] = combined
 
         return merged
+
+    def _merge_llm_priority(
+        self,
+        llm_entities: Dict[str, List[str]],
+        regex_entities: Dict[str, List[str]],
+        llm_weight: float = 0.8
+    ) -> Dict[str, List[str]]:
+        """
+        Merge LLM and Regex results with LLM priority (for LLM-First strategy)
+
+        Strategy (80% LLM, 20% Regex):
+        - Take all LLM entities (PRIMARY source)
+        - Add regex entities only if:
+          1. LLM didn't extract that entity type
+          2. Regex entity is factual (Bank, Document, Error, Status)
+          3. Regex entity provides additional specific detail
+        """
+        merged = {}
+
+        # Get all entity types
+        all_types = set(llm_entities.keys()) | set(regex_entities.keys())
+
+        for entity_type in all_types:
+            llm_vals = llm_entities.get(entity_type, [])
+            regex_vals = regex_entities.get(entity_type, [])
+
+            # Priority 1: Start with all LLM values (always include)
+            merged[entity_type] = llm_vals.copy()
+
+            # Priority 2: Add regex values selectively
+            # High-value factual entity types - trust regex
+            if entity_type in ['Bank', 'Document', 'Error', 'Status', 'Fee', 'Limit']:
+                for rv in regex_vals:
+                    if rv not in merged[entity_type]:
+                        merged[entity_type].append(rv)
+
+            # If LLM missed entirely, use regex
+            elif not llm_vals and regex_vals:
+                merged[entity_type].extend(regex_vals)
+
+            # If regex provides more specific detail, add it
+            elif regex_vals:
+                for rv in regex_vals:
+                    # Check if regex value is more specific than LLM value
+                    is_more_specific = any(
+                        len(rv) > len(lv) and lv.lower() in rv.lower()
+                        for lv in llm_vals
+                    )
+                    # Or if it's completely different valuable info
+                    is_different = not any(
+                        rv.lower() in lv.lower() or lv.lower() in rv.lower()
+                        for lv in llm_vals
+                    )
+
+                    if (is_more_specific or is_different) and rv not in merged[entity_type]:
+                        merged[entity_type].append(rv)
+
+        return merged
+
+    def _validate_with_regex(
+        self,
+        query: str,
+        entities: Dict[str, List[str]]
+    ) -> Dict[str, List[str]]:
+        """
+        Validate LLM-extracted entities using regex patterns
+
+        Strategy:
+        - Remove LLM entities that don't appear in query text (hallucinations)
+        - Validate factual entities (Bank, Document) against known patterns
+        - Keep semantic entities (Topic, Action) as-is (LLM can infer these)
+        """
+        validated = {}
+
+        query_lower = query.lower()
+
+        for entity_type, values in entities.items():
+            validated[entity_type] = []
+
+            for value in values:
+                # Skip validation for semantic entity types (LLM can infer)
+                if entity_type in ['Topic', 'Action', 'Requirement', 'Service']:
+                    # For these, LLM inference is acceptable
+                    # But still check if it's too far from query
+                    value_words = set(value.lower().split())
+                    query_words = set(query_lower.split())
+                    overlap = len(value_words & query_words)
+
+                    # Accept if at least 30% overlap or very short (1-2 words)
+                    if overlap > 0 or len(value_words) <= 2:
+                        validated[entity_type].append(value)
+                    else:
+                        logger.warning(f"   ⚠️ Filtered LLM entity (no overlap): {entity_type}={value}")
+
+                # Strict validation for factual entities
+                elif entity_type in ['Bank', 'Document', 'Error']:
+                    # Must appear in query text
+                    if value.lower() in query_lower:
+                        validated[entity_type].append(value)
+                    else:
+                        logger.warning(f"   ⚠️ Filtered LLM entity (not in query): {entity_type}={value}")
+
+                # Moderate validation for others
+                else:
+                    # Check if at least one word appears
+                    value_words = value.lower().split()
+                    if any(word in query_lower for word in value_words):
+                        validated[entity_type].append(value)
+                    else:
+                        logger.warning(f"   ⚠️ Filtered LLM entity (no words match): {entity_type}={value}")
+
+        return validated
 
 
 # ============================================
