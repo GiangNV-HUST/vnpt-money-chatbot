@@ -95,8 +95,23 @@ class Neo4jGraphRAGEngine:
             logger.info("🔗 Processing step continuation query")
             return self._handle_step_continuation(user_query, continuation_context, query_entities)
 
-        # Step 2: Find relevant nodes (GRAPH-ONLY search)
+        # Step 2: Find relevant nodes (GRAPH-ONLY search) with REGEX FALLBACK
         relevant_nodes = self._find_relevant_nodes(user_query, query_entities, top_k, intent)
+
+        # Step 2.5: REGEX FALLBACK - If no nodes found with LLM entities, try adding regex entities
+        if getattr(config, 'USE_REGEX_FALLBACK_ON_EMPTY_RESULTS', False):
+            if not relevant_nodes or len(relevant_nodes) == 0:
+                logger.warning("⚠️ No nodes found with LLM entities, trying regex fallback...")
+                query_entities = self._augment_with_regex_entities(user_query, query_entities)
+                logger.info(f"Augmented entities: {query_entities}")
+
+                # Retry search with augmented entities
+                relevant_nodes = self._find_relevant_nodes(user_query, query_entities, top_k, intent)
+
+                if relevant_nodes and len(relevant_nodes) > 0:
+                    logger.info(f"✅ Regex fallback successful: found {len(relevant_nodes)} nodes")
+                else:
+                    logger.warning("❌ Regex fallback also returned no results")
 
         # Step 3: Traverse graph to get context (with early exact match boosting)
         context = self._get_graph_context(relevant_nodes, query_entities, user_query)
@@ -139,6 +154,74 @@ class Neo4jGraphRAGEngine:
         except Exception as e:
             logger.error(f"Failed to extract entities from query: {e}")
             return {}
+
+    def _augment_with_regex_entities(self, user_query: str, llm_entities: Dict) -> Dict:
+        """
+        Augment LLM entities with regex-extracted entities when Neo4j query returns no results
+
+        Strategy:
+        - LLM entities are PRIMARY (already used but returned no results)
+        - Extract entities using PURE REGEX (no LLM)
+        - Add regex entities that LLM missed
+        - This helps find results when LLM entities are too semantic/inferred
+
+        Args:
+            user_query: User's question
+            llm_entities: Entities already extracted by LLM
+
+        Returns:
+            Augmented entities dictionary
+        """
+        try:
+            logger.info("🔍 Extracting additional regex entities for fallback...")
+
+            # Temporarily disable LLM to get pure regex extraction
+            original_llm_setting = getattr(config, 'USE_LLM_FIRST_STRATEGY', True)
+            original_fallback_setting = getattr(config, 'ENABLE_LLM_FALLBACK', True)
+
+            config.USE_LLM_FIRST_STRATEGY = False
+            config.ENABLE_LLM_FALLBACK = False
+
+            # Extract with pure regex
+            regex_entities, regex_conf = self.entity_extractor.extract_with_confidence(user_query)
+
+            # Restore settings
+            config.USE_LLM_FIRST_STRATEGY = original_llm_setting
+            config.ENABLE_LLM_FALLBACK = original_fallback_setting
+
+            logger.info(f"Pure regex entities: {regex_entities}")
+
+            # Merge: Start with LLM entities, add regex entities that are missing
+            augmented = llm_entities.copy()
+
+            for entity_type, regex_values in regex_entities.items():
+                if not regex_values or not isinstance(regex_values, list):
+                    continue
+
+                llm_values = llm_entities.get(entity_type, [])
+
+                # Add regex values that LLM didn't find
+                for regex_val in regex_values:
+                    # Check if this value or similar exists in LLM results
+                    exists = any(
+                        regex_val.lower() in llm_val.lower() or
+                        llm_val.lower() in regex_val.lower()
+                        for llm_val in llm_values
+                        if isinstance(llm_val, str)
+                    )
+
+                    if not exists:
+                        if entity_type not in augmented:
+                            augmented[entity_type] = []
+                        if regex_val not in augmented[entity_type]:
+                            augmented[entity_type].append(regex_val)
+                            logger.info(f"   ➕ Added from regex: {entity_type}={regex_val}")
+
+            return augmented
+
+        except Exception as e:
+            logger.error(f"Failed to augment with regex entities: {e}")
+            return llm_entities  # Return original on error
 
     def _find_relevant_nodes(
         self,

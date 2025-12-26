@@ -90,6 +90,10 @@ USE_LLM_FIRST_STRATEGY = True  # Always use LLM first, regex for augmentation (8
 LLM_FIRST_REGEX_WEIGHT = 0.2  # How much weight to give regex results (0.2 = 20%)
 LLM_FIRST_VALIDATION = True  # Use regex to validate LLM results
 
+# Regex Fallback Strategy (NEWEST! - Regex supplements when Neo4j query fails)
+USE_REGEX_FALLBACK_ON_EMPTY_RESULTS = True  # If Neo4j returns no results with LLM entities, add regex entities and retry
+REGEX_FALLBACK_MAX_RETRIES = 2  # Maximum number of retries with regex augmentation
+
 # Response Generation
 RESPONSE_LANGUAGE = "vi"  # Vietnamese
 INCLUDE_SOURCES = True  # Include source references in response
