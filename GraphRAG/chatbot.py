@@ -77,8 +77,18 @@ class GraphRAGChatbot:
             continuation_context=continuation_context
         )
 
-        # Step 3: Generate response using LLM
-        if self.llm:
+        # Step 3: Generate response
+        # CRITICAL FIX: For procedural FAQs with steps, use original answer directly
+        # to preserve all steps without LLM summarization
+        steps = rag_result.get("steps", [])
+        has_steps = steps and len(steps) > 0
+
+        if has_steps and rag_result.get("status") == "success":
+            # Procedural FAQ - use original answer to preserve all steps
+            logger.info(f"Procedural FAQ detected ({len(steps)} steps), using original answer")
+            response = rag_result.get("answer", "")
+        elif self.llm:
+            # Non-procedural or no steps - use LLM for better formatting
             response = self._generate_llm_response(user_message, rag_result, continuation_context)
         else:
             response = self._generate_template_response(rag_result)

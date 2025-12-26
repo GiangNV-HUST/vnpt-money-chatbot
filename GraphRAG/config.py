@@ -58,8 +58,9 @@ SIMPLE_QUERY_THRESHOLD = 0.8  # Confidence threshold for simple queries
 ENABLE_HYBRID_MODE = True  # Enable Vector + Graph hybrid
 
 # Hybrid Search Weights (must sum to 1.0)
-HYBRID_WEIGHT_ENTITY_GRAPH = 0.5  # Entity-based graph search (50%)
-HYBRID_WEIGHT_SEMANTIC = 0.5      # Semantic similarity search (50% - equal weight to handle missing graph relationships)
+# UPDATED: Prioritize entity-based graph matching to reduce semantic search contamination
+HYBRID_WEIGHT_ENTITY_GRAPH = 0.7  # Entity-based graph search (70% - increased to prioritize exact entity matches)
+HYBRID_WEIGHT_SEMANTIC = 0.3      # Semantic similarity search (30% - reduced to minimize contamination from previous queries)
 HYBRID_WEIGHT_KEYWORD = 0.0       # Keyword search (disabled in hybrid mode)
 
 # Vector Store Configuration (for hybrid mode)

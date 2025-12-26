@@ -1,130 +1,64 @@
 # -*- coding: utf-8 -*-
 """
-Debug why "Thanh toán hóa đơn" cases all fail
+Debug Thanh toán hóa đơn viễn thông query
 """
 import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-from enhanced_entity_extractor import EnhancedEntityExtractor
-from neo4j_connector import Neo4jConnector
+from neo4j_rag_engine import Neo4jGraphRAGEngine
 
 print("=" * 80)
-print("DEBUG: Thanh toán hóa đơn entity extraction")
+print("DEBUG: Thanh toán hóa đơn viễn thông")
 print("=" * 80)
 
-extractor = EnhancedEntityExtractor()
+engine = Neo4jGraphRAGEngine()
 
-# Test query
-query = "Tôi muốn thanh toán hóa đơn tiền điện qua VNPT Money"
+query = "Làm thế nào để thanh toán hóa đơn viễn thông?"
 
 print(f"\nQuery: {query}")
 print("-" * 80)
 
-# Extract entities
-entities, confidence = extractor.extract_with_confidence(query)
+result = engine.query(query)
 
-print(f"\n📊 Extracted Entities:")
-print(f"   Topics: {entities.get('Topic', [])}")
-print(f"   Actions: {entities.get('Action', [])}")
-print(f"   UIElements: {entities.get('UIElement', [])}")
-print(f"   Confidence: {confidence:.0%}")
+print(f"\nStatus: {result.get('status')}")
+print(f"Answer:\n{result.get('answer', 'No answer')}\n")
 
-# Check in Neo4j
-print("\n" + "=" * 80)
-print("CHECKING NEO4J FOR 'THANH TOÁN HÓA ĐƠN' FAQs")
-print("=" * 80)
-
-connector = Neo4jConnector()
-
-# Query 1: Search for FAQs with "thanh toán" + "hóa đơn"
-query1 = """
-MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process)
-WHERE toLower(faq.question) CONTAINS 'thanh toán'
-  AND toLower(faq.question) CONTAINS 'hóa đơn'
-MATCH (p)-[:HAS_STEP]->(s:Step)
-WITH faq, p, count(s) as step_count
-RETURN faq.id as faq_id,
-       faq.question as question,
-       p.name as process_name,
-       step_count
-ORDER BY step_count DESC
-LIMIT 10
-"""
-
-with connector.driver.session(database=connector.database) as session:
-    results1 = session.run(query1).data()
-
-print(f"\nFound {len(results1)} FAQs with 'thanh toán' + 'hóa đơn':")
-for i, r in enumerate(results1, 1):
-    print(f"\n{i}. {r['faq_id']}: {r['question'][:80]}...")
-    print(f"   Process: {r['process_name']}")
-    print(f"   Steps: {r['step_count']}")
-
-# Query 2: Search for FAQs with "thanh toán" + "điện"
-print("\n" + "=" * 80)
-print("FAQs with 'thanh toán' + 'điện':")
-print("=" * 80)
-
-query2 = """
-MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process)
-WHERE toLower(faq.question) CONTAINS 'thanh toán'
-  AND (toLower(faq.question) CONTAINS 'điện' OR toLower(faq.question) CONTAINS 'viễn thông')
-MATCH (p)-[:HAS_STEP]->(s:Step)
-WITH faq, p, count(s) as step_count
-RETURN faq.id as faq_id,
-       faq.question as question,
-       p.name as process_name,
-       step_count
-ORDER BY step_count DESC
-LIMIT 10
-"""
-
-with connector.driver.session(database=connector.database) as session:
-    results2 = session.run(query2).data()
-
-print(f"\nFound {len(results2)} FAQs:")
-for i, r in enumerate(results2, 1):
-    print(f"\n{i}. {r['faq_id']}: {r['question'][:80]}...")
-    print(f"   Process: {r['process_name']}")
-    print(f"   Steps: {r['step_count']}")
-
-# Query 3: What is FAQ_497 that keeps matching?
-print("\n" + "=" * 80)
-print("CHECKING FAQ_497 (the wrong FAQ being matched)")
-print("=" * 80)
-
-query3 = """
-MATCH (faq:FAQ {id: 'FAQ_497'})
-OPTIONAL MATCH (faq)-[:DESCRIBES_PROCESS]->(p:Process)
-OPTIONAL MATCH (p)-[:HAS_STEP]->(s:Step)
-WITH faq, p, count(s) as step_count
-RETURN faq.id as faq_id,
-       faq.question as question,
-       faq.answer as answer,
-       p.name as process_name,
-       step_count
-"""
-
-with connector.driver.session(database=connector.database) as session:
-    result3 = session.run(query3).data()
-
-if result3:
-    r = result3[0]
-    print(f"\nFAQ_497:")
-    print(f"Question: {r['question']}")
-    print(f"Answer (first 300 chars): {r['answer'][:300]}...")
-    print(f"Process: {r['process_name']}")
-    print(f"Steps: {r['step_count']}")
+if result.get('steps'):
+    print(f"Steps extracted: {len(result['steps'])}")
+    for i, step in enumerate(result['steps'], 1):
+        # Use step_text or step_title (not description/content)
+        step_content = step.get('step_text', step.get('step_title', step.get('description', step.get('content', 'N/A'))))
+        print(f"  {i}. {step_content}")
 else:
-    print("\nFAQ_497 not found!")
+    print("No steps extracted!")
 
-connector.close()
+# Check all_results to see actual FAQ
+if result.get('all_results'):
+    print(f"\nTop FAQ matched:")
+    top_faq = result['all_results'][0]
+    print(f"  Question: {top_faq.get('question', 'N/A')}")
+    print(f"  Answer preview: {top_faq.get('answer', 'N/A')[:200]}...")
 
-print("\n" + "=" * 80)
-print("ANALYSIS")
-print("=" * 80)
-print("\nIssues found:")
-print("1. Entity extraction only found 'Thanh toán' (generic)")
-print("2. Need to check why FAQ_497 is matching instead of correct FAQ")
-print("3. Confidence is 50% - right at LLM fallback threshold")
+    # Check if FAQ has steps in Neo4j
+    from neo4j_connector import Neo4jConnector
+    conn = Neo4jConnector()
+
+    faq_id = top_faq.get('faq_id')
+    if faq_id:
+        print(f"\n  Checking Neo4j for FAQ {faq_id} steps...")
+        query_cypher = """
+        MATCH (faq:FAQ {faq_id: $faq_id})-[:HAS_STEP]->(step:Step)
+        RETURN step.step_number AS step_num, step.description AS desc
+        ORDER BY step.step_number
+        """
+        steps_in_neo4j = conn.execute_query(query_cypher, {"faq_id": faq_id})
+
+        if steps_in_neo4j:
+            print(f"  ✅ Found {len(steps_in_neo4j)} steps in Neo4j:")
+            for s in steps_in_neo4j:
+                print(f"     Bước {s['step_num']}: {s['desc']}")
+        else:
+            print(f"  ❌ No steps found in Neo4j!")
+
+    conn.close()

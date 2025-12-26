@@ -28,10 +28,18 @@ def test_process(chatbot, question, completed_steps, total_steps, process_name):
     r1 = chatbot.chat(question)
     answer1 = r1 if isinstance(r1, str) else r1.get('answer', str(r1))
 
+    # DEBUG: Show which FAQ was matched
+    if isinstance(r1, dict) and 'all_results' in r1 and r1['all_results']:
+        top_faq = r1['all_results'][0]
+        print(f"DEBUG: Matched FAQ ID: {top_faq.get('faq_id', 'N/A')}")
+        print(f"DEBUG: FAQ Question: {top_faq.get('question', 'N/A')[:80]}...")
+
     # Count steps in answer
     import re
     steps_found = len(re.findall(r'Bước\s+\d+:', answer1))
     print(f"Bot trả lời với {steps_found} bước")
+    if steps_found > 0:
+        print(f"Answer preview: {answer1[:150]}...")
 
     if steps_found >= total_steps:
         print(f"✅ Hiển thị đủ {total_steps} bước")
