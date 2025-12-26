@@ -93,6 +93,18 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"thanh\s*toán\s+(cước\s+)?(viễn\s*thông|internet)", "Thanh toán hóa đơn viễn thông"),
             (r"thanh\s*toán\s+hóa\s*đơn", "Thanh toán hóa đơn"),
 
+            # Generic topics that LLM often extracts
+            (r"chuyển\s+tiền", "Chuyển tiền"),
+            (r"nạp\s+tiền", "Nạp tiền"),
+            (r"rút\s+tiền", "Rút tiền"),
+            (r"cài\s+đặt", "Cài đặt"),
+            (r"hủy\s+dịch\s+vụ", "Hủy dịch vụ"),
+            (r"mở\s+tài\s+khoản", "Mở tài khoản"),
+            (r"định\s+danh", "Định danh"),
+            (r"liên\s+kết\s+ngân\s+hàng", "Liên kết ngân hàng"),
+            # Context-based Topic patterns
+            (r"nhập\s+số\s+tiền\s+cần\s+chuyển", "Chuyển tiền"),  # From context
+
             # Mở khóa patterns
             (r"mở\s*khóa\s+(tài\s*khoản|ví)", "Mở khóa tài khoản"),
             (r"unlock\s+(account|ví)", "Mở khóa tài khoản"),
@@ -118,6 +130,11 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"gọi\s+hotline", "Liên hệ hỗ trợ"),
             (r"tra\s*soát", "Tra soát"),
             (r"yêu\s*cầu\s+tra\s*soát", "Tra soát"),
+
+            # Common actions from LLM gaps
+            (r"mở\s+tài\s+khoản", "Mở tài khoản"),
+            (r"xem\s+lịch\s+sử\s+giao\s+dịch", "Xem lịch sử giao dịch"),
+            (r"bấm\s+vào\s+nút\s+xác\s+nhận", "Bấm vào nút Xác nhận"),
         ]
 
         # THÊM: Regex patterns cho Status detection (NEW!)
@@ -154,6 +171,7 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"bắt\s+buộc", "bắt buộc"),
             (r"cần\s+thiết", "cần thiết"),
             (r"đòi\s+hỏi", "yêu cầu"),
+            (r"có\s+(cccd|cmnd)", "Có CCCD"),  # From LLM gaps
         ]
 
         # THÊM: Regex patterns cho Feature detection (NEW! - PRIORITY 1)
@@ -187,9 +205,13 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"(tab|mục)\s+cài\s+đặt", "Cài đặt"),
             (r"(tab|mục)\s+trợ\s+giúp", "Trợ giúp"),
 
-            # Buttons
+            # Buttons (specific)
+            (r"nút\s+xác\s+nhận", "Xác nhận"),  # From LLM gaps
             (r"nút\s+(chuyển\s+tiền|nạp\s+tiền|rút\s+tiền|xác\s+nhận|hủy)", "nút"),
             (r"(nhấn|bấm|chọn)\s+vào", "action button"),
+
+            # Generic references
+            (r"\bmục\b", "Mục"),  # From LLM gaps
 
             # Fields
             (r"(ô|trường)\s+nhập", "input field"),
