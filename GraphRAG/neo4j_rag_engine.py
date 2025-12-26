@@ -1205,18 +1205,32 @@ class Neo4jGraphRAGEngine:
             Same format as _query_steps_by_faq_id or None
         """
         try:
-            # Map topics/keywords to process name
+            # Map topics/keywords to process name with MORE SPECIFIC keywords
+            # Format: topic -> (process_name, [required_keywords], [optional_keywords])
             topic_to_process = {
-                "rút tiền": ("withdrawal", ["rút tiền", "ví", "ngân hàng"]),
-                "withdrawal": ("withdrawal", ["rút tiền", "ví", "ngân hàng"]),
-                "nạp tiền": ("deposit", ["nạp tiền", "ngân hàng"]),
-                "deposit": ("deposit", ["nạp tiền", "ngân hàng"]),
-                "chuyển tiền": ("transfer", ["chuyển tiền", "ngân hàng"]),
-                "transfer": ("transfer", ["chuyển tiền", "ngân hàng"]),
-                "thanh toán": ("payment", ["thanh toán"]),
-                "payment": ("payment", ["thanh toán"]),
-                "mua vé": ("buy_ticket", ["mua vé"]),
-                "buy_ticket": ("buy_ticket", ["mua vé"]),
+                # More specific patterns first (will be checked in order)
+                "hủy nạp tiền": ("cancel_deposit", ["hủy", "nạp tiền"], ["tự động", "dịch vụ"]),
+                "hủy dịch vụ": ("cancel_deposit", ["hủy", "dịch vụ"], ["nạp tiền", "tự động"]),
+                "mua vé máy bay": ("buy_ticket_flight", ["mua vé", "máy bay"], []),
+                "mua vé tàu": ("buy_ticket_train", ["mua vé", "tàu"], []),
+                "mua vé vui chơi": ("buy_ticket_entertainment", ["mua vé", "vui chơi"], []),
+                "nạp tiền điện thoại": ("recharge_phone", ["nạp tiền", "điện thoại"], []),
+                "nạp tiền từ ngân hàng": ("deposit_bank", ["nạp tiền", "ngân hàng"], []),
+                "rút tiền về ngân hàng": ("withdrawal", ["rút tiền", "ngân hàng"], ["ví", "vnpt pay", "mobile money"]),
+                "chuyển tiền đến ngân hàng": ("transfer", ["chuyển tiền", "ngân hàng"], []),
+                "thanh toán hóa đơn": ("payment_bill", ["thanh toán", "hóa đơn"], ["viễn thông"]),
+
+                # Generic patterns last (fallback)
+                "rút tiền": ("withdrawal", ["rút tiền"], ["ví", "ngân hàng"]),
+                "withdrawal": ("withdrawal", ["rút tiền"], ["ví", "ngân hàng"]),
+                "nạp tiền": ("deposit", ["nạp tiền"], ["ngân hàng"]),
+                "deposit": ("deposit", ["nạp tiền"], ["ngân hàng"]),
+                "chuyển tiền": ("transfer", ["chuyển tiền"], ["ngân hàng"]),
+                "transfer": ("transfer", ["chuyển tiền"], ["ngân hàng"]),
+                "thanh toán": ("payment", ["thanh toán"], []),
+                "payment": ("payment", ["thanh toán"], []),
+                "mua vé": ("buy_ticket", ["mua vé"], []),
+                "buy_ticket": ("buy_ticket", ["mua vé"], []),
             }
 
             # Extract process info from FAQ_ID pattern (old method)
@@ -1229,24 +1243,38 @@ class Neo4jGraphRAGEngine:
             }
 
             process_name = None
-            keywords = []
+            required_keywords = []
+            optional_keywords = []
 
             # Try to infer from FAQ_ID pattern first
             for pattern, (proc_name, kws) in faq_patterns.items():
                 if pattern in faq_id.upper():
                     process_name = proc_name
-                    keywords = kws
+                    required_keywords = kws
+                    optional_keywords = []
                     logger.info(f"🔍 Fallback: Inferred '{process_name}' from FAQ_ID pattern '{faq_id}'")
                     break
 
-            # If not found, try to infer from topic
+            # If not found, try to infer from topic (with new 3-tuple format)
             if not process_name and topic:
                 topic_lower = topic.lower().strip()
-                for topic_key, (proc_name, kws) in topic_to_process.items():
+                # Check in order (specific patterns first)
+                for topic_key, pattern_info in topic_to_process.items():
+                    if len(pattern_info) == 3:
+                        proc_name, req_kws, opt_kws = pattern_info
+                    else:
+                        # Old format compatibility
+                        proc_name, req_kws = pattern_info
+                        opt_kws = []
+
                     if topic_key in topic_lower or topic_lower in topic_key:
                         process_name = proc_name
-                        keywords = kws
+                        required_keywords = req_kws
+                        optional_keywords = opt_kws
                         logger.info(f"🔍 Fallback: Inferred '{process_name}' from topic '{topic}'")
+                        logger.info(f"   Required keywords: {required_keywords}")
+                        if optional_keywords:
+                            logger.info(f"   Optional keywords: {optional_keywords}")
                         break
 
             if not process_name:
@@ -1254,10 +1282,13 @@ class Neo4jGraphRAGEngine:
                 return None
 
             logger.info(f"🔍 Fallback: Inferred process '{process_name}' from FAQ_ID '{faq_id}'")
-            logger.info(f"   Keywords: {keywords}")
 
-            # Build WHERE clause for keywords
-            keyword_conditions = " OR ".join([f"toLower(faq.question) CONTAINS '{kw}'" for kw in keywords])
+            # Build WHERE clause with REQUIRED keywords (ALL must match)
+            # and OPTIONAL keywords (at least one should match for better ranking)
+            required_conditions = " AND ".join([f"toLower(faq.question) CONTAINS '{kw}'" for kw in required_keywords])
+
+            # For optional keywords, we'll use them in ORDER BY for ranking
+            # FAQs with more optional keywords will be ranked higher
 
             # Build WHERE clause for steps
             if only_next_step:
@@ -1265,14 +1296,26 @@ class Neo4jGraphRAGEngine:
             else:
                 step_where = "WHERE s.number >= $from_step"
 
-            # Query by process name + keywords
-            # IMPORTANT: Prioritize processes with MORE steps (more detailed/complete)
+            # Build optional keyword scoring for ranking
+            # FAQs matching more optional keywords rank higher
+            if optional_keywords:
+                optional_score_expr = " + ".join([
+                    f"CASE WHEN toLower(faq.question) CONTAINS '{kw}' THEN 1 ELSE 0 END"
+                    for kw in optional_keywords
+                ])
+                order_by = f"ORDER BY ({optional_score_expr}) DESC, total_count DESC"
+            else:
+                # If no optional keywords, just prioritize more steps
+                order_by = "ORDER BY total_count DESC"
+
+            # Query by process name + REQUIRED keywords
+            # IMPORTANT: Prioritize FAQs with more optional keywords, then more steps
             cypher = f"""
             MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process {{name: $process_name}})
-            WHERE {keyword_conditions}
+            WHERE {required_conditions}
             MATCH (p)-[:HAS_STEP]->(all_s:Step)
             WITH faq, p, count(all_s) as total_count
-            ORDER BY total_count DESC
+            {order_by}
             LIMIT 1
             MATCH (p)-[:HAS_STEP]->(s:Step)
             {step_where}
@@ -1297,13 +1340,13 @@ class Neo4jGraphRAGEngine:
                 logger.warning(f"Fallback query found no results for process '{process_name}'")
 
                 # Try to get total count even if step not found
-                # IMPORTANT: Prioritize processes with MORE steps (most detailed)
+                # IMPORTANT: Prioritize FAQs with more optional keywords, then more steps
                 count_cypher = f"""
                 MATCH (faq:FAQ)-[:DESCRIBES_PROCESS]->(p:Process {{name: $process_name}})
-                WHERE {keyword_conditions}
+                WHERE {required_conditions}
                 MATCH (p)-[:HAS_STEP]->(s:Step)
                 WITH p, count(s) as step_count
-                ORDER BY step_count DESC
+                {order_by.replace("total_count", "step_count")}
                 LIMIT 1
                 RETURN step_count as total_count
                 """
