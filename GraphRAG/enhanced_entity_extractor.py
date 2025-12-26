@@ -87,6 +87,12 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
 
         # THÊM: Regex patterns cho topic detection
         self.topic_patterns_regex = [
+            # CRITICAL FIX: Thanh toán hóa đơn patterns (SPECIFIC patterns first!)
+            (r"thanh\s*toán\s+(hóa\s*đơn\s+)?(tiền\s+)?(điện|nước|gas)", "Thanh toán hóa đơn"),
+            (r"thanh\s*toán\s+hóa\s*đơn\s+(viễn\s*thông|internet|cước)", "Thanh toán hóa đơn viễn thông"),
+            (r"thanh\s*toán\s+(cước\s+)?(viễn\s*thông|internet)", "Thanh toán hóa đơn viễn thông"),
+            (r"thanh\s*toán\s+hóa\s*đơn", "Thanh toán hóa đơn"),
+
             # Mở khóa patterns
             (r"mở\s*khóa\s+(tài\s*khoản|ví)", "Mở khóa tài khoản"),
             (r"unlock\s+(account|ví)", "Mở khóa tài khoản"),

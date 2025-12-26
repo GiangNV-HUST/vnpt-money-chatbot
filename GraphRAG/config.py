@@ -81,7 +81,7 @@ USE_LLM_EXTRACTION = True  # Use LLM for entity and relationship extraction
 
 # Hybrid Entity Extraction (Pattern + LLM Fallback)
 ENABLE_LLM_FALLBACK = True  # Enable LLM fallback when pattern-based confidence is low
-LLM_FALLBACK_THRESHOLD = 0.5  # Use LLM if pattern confidence < 50%
+LLM_FALLBACK_THRESHOLD = 0.45  # Use LLM if pattern confidence < 45% (lowered from 0.5 to catch more edge cases)
 LLM_FALLBACK_FOR_QUESTIONS = True  # Always use LLM for question-type queries with low entity coverage
 LLM_FALLBACK_FOR_AMBIGUOUS = True  # Use LLM for ambiguous queries
 
