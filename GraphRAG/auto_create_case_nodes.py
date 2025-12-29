@@ -83,6 +83,36 @@ class AutoCaseNodeCreator:
                         'cases': cases,
                         'original_answer': answer
                     })
+                    continue
+
+            # Pattern 4: FAQ có bullet points (•, -, +) - ANY bullets
+            bullet_count = len(re.findall(r'\n\s*[•\-+]\s+', answer))
+
+            if bullet_count >= 3:  # At least 3 bullet points
+                cases = self._parse_bullet_conditions(answer)
+
+                if cases:
+                    self.faqs_to_process.append({
+                        'question': question,
+                        'type': 'condition',
+                        'cases': cases,
+                        'original_answer': answer
+                    })
+                    continue
+
+            # Pattern 5: FAQ có numbered steps với bullets bên trong
+            numbered_bullets = re.search(r'\d+\.\s+[^\n]+\n\s*[-+•]\s+', answer)
+
+            if numbered_bullets and bullet_count >= 2:
+                cases = self._parse_numbered_with_bullets(answer)
+
+                if cases:
+                    self.faqs_to_process.append({
+                        'question': question,
+                        'type': 'condition',
+                        'cases': cases,
+                        'original_answer': answer
+                    })
 
         print(f'\n✅ Phân tích xong: {len(self.faqs_to_process)} FAQs cần tạo Case nodes')
 
@@ -111,11 +141,16 @@ class AutoCaseNodeCreator:
             name_match = re.match(r'^([^:\n]+)', section)
             method_name = name_match.group(1).strip() if name_match else f'Phương thức {i}'
 
+            # Remove trailing colon from name if present
+            if method_name.endswith(':'):
+                method_name = method_name[:-1].strip()
+
             cases.append({
                 'name': method_name,
-                'description': section[:200],
+                'description': section,  # ✅ FIXED: Keep full text (was section[:200])
                 'full_content': section,
-                'case_type': 'method'
+                'case_type': 'method',
+                'keywords': self._extract_case_keywords(method_name, section)
             })
 
         return cases
@@ -131,43 +166,271 @@ class AutoCaseNodeCreator:
                 case_num = sections[i-1]
                 content = sections[i].strip()
 
-                # Extract case name
-                name_match = re.match(r'^([^:\n]+)', content)
-                case_name = name_match.group(1).strip() if name_match else f'{keyword} {case_num}'
+                # Extract case name (first sentence or up to 80 chars)
+                name_match = re.match(r'^([^:\n.]+)', content)
+                if name_match:
+                    case_name = name_match.group(1).strip()
+                    # Limit name length
+                    if len(case_name) > 80:
+                        case_name = case_name[:80] + '...'
+                else:
+                    case_name = f'{keyword} {case_num}'
 
                 cases.append({
                     'name': case_name,
-                    'description': content[:200],
+                    'description': content,  # ✅ FIXED: Keep full text (was content[:200])
                     'full_content': content,
-                    'case_type': 'condition'
+                    'case_type': 'condition',
+                    'keywords': self._extract_case_keywords(case_name, content)
                 })
 
         return cases
 
     def _parse_if_then(self, answer):
-        """Parse answer có cấu trúc If-Then"""
-        # Find all "Nếu...thì" patterns
+        """Parse answer có cấu trúc If-Then - Enhanced to handle multiple formats"""
+        cases = []
+
+        # Strategy 1: Split by "Nếu" at line start (existing)
         if_sections = re.split(r'\n+(?=Nếu\s+)', answer, flags=re.IGNORECASE)
 
-        cases = []
         for section in if_sections:
             if not section.strip().lower().startswith('nếu'):
                 continue
 
-            # Extract condition
-            condition_match = re.match(r'Nếu\s+(.+?)(?:\s+thì|\s*:|\n)', section, re.IGNORECASE | re.DOTALL)
+            # Extract condition (first sentence up to 80 chars)
+            condition_match = re.match(r'Nếu\s+(.+?)(?:\s+thì|\s*:|\.|,)', section, re.IGNORECASE | re.DOTALL)
 
             if condition_match:
                 condition = condition_match.group(1).strip()
 
+                # Create concise name
+                if len(condition) > 80:
+                    case_name = f'Nếu {condition[:77]}...'
+                else:
+                    case_name = f'Nếu {condition}'
+
                 cases.append({
-                    'name': f'Nếu {condition[:50]}...',
-                    'description': section[:200],
+                    'name': case_name,
+                    'description': section,
                     'full_content': section,
-                    'case_type': 'if_then'
+                    'case_type': 'if_then',
+                    'keywords': self._extract_case_keywords(case_name, section)
                 })
 
+        # Strategy 2: Split by "- Nếu" or "+ Nếu" (for bullet/dash format)
+        if len(cases) < 2:
+            dash_sections = re.split(r'\n\s*[-+•]\s*(?=Nếu\s+)', answer, flags=re.IGNORECASE)
+
+            temp_cases = []
+            for section in dash_sections:
+                section = section.strip()
+                if not section.lower().startswith('nếu'):
+                    continue
+
+                condition_match = re.match(r'Nếu\s+(.+?)(?:\s+thì|\s*:|\.|,)', section, re.IGNORECASE | re.DOTALL)
+
+                if condition_match:
+                    condition = condition_match.group(1).strip()
+
+                    if len(condition) > 80:
+                        case_name = f'Nếu {condition[:77]}...'
+                    else:
+                        case_name = f'Nếu {condition}'
+
+                    temp_cases.append({
+                        'name': case_name,
+                        'description': section,
+                        'full_content': section,
+                        'case_type': 'if_then',
+                        'keywords': self._extract_case_keywords(case_name, section)
+                    })
+
+            if len(temp_cases) >= len(cases):
+                cases = temp_cases
+
+        # Strategy 3: Split by numbered "1. Trường hợp" format with "Nếu" inside
+        if len(cases) < 2:
+            numbered_sections = re.split(r'\n\s*(\d+)\.\s*Trường hợp', answer, flags=re.IGNORECASE)
+
+            temp_cases = []
+            for i in range(2, len(numbered_sections), 2):
+                if i < len(numbered_sections):
+                    case_num = numbered_sections[i-1]
+                    content = numbered_sections[i].strip()
+
+                    # Extract "Nếu..." from content
+                    if_match = re.search(r'(Nếu\s+.+?)(?:\n|$)', content, re.IGNORECASE)
+
+                    if if_match:
+                        condition = if_match.group(1).strip()
+
+                        # Clean up condition
+                        condition = re.sub(r'\s+thì.*', '', condition, flags=re.IGNORECASE)
+                        condition = re.sub(r'^Nếu\s+', '', condition, flags=re.IGNORECASE)
+
+                        if len(condition) > 80:
+                            case_name = f'Nếu {condition[:77]}...'
+                        else:
+                            case_name = f'Nếu {condition}'
+
+                        temp_cases.append({
+                            'name': case_name,
+                            'description': content,
+                            'full_content': content,
+                            'case_type': 'if_then',
+                            'keywords': self._extract_case_keywords(case_name, content)
+                        })
+
+            if len(temp_cases) >= len(cases):
+                cases = temp_cases
+
         return cases
+
+    def _parse_bullet_conditions(self, answer):
+        """Parse answer có bullet points (•, -, +) với conditions"""
+        # Split by bullet points
+        sections = re.split(r'\n\s*([•\-+])\s+', answer)
+
+        cases = []
+        for i in range(1, len(sections), 2):  # Pairs of (bullet, content)
+            if i + 1 >= len(sections):
+                break
+
+            bullet = sections[i]
+            content = sections[i + 1].strip()
+
+            # Skip if too short (likely not a case)
+            if len(content) < 20:
+                continue
+
+            # Extract case name (first line or condition)
+            name_match = re.match(r'^([^:\n.]+(?:[:.])?)', content)
+
+            if name_match:
+                case_name = name_match.group(1).strip()
+
+                # Remove trailing punctuation
+                case_name = re.sub(r'[:.,;]+$', '', case_name)
+
+                # Limit length
+                if len(case_name) > 80:
+                    case_name = case_name[:80] + '...'
+
+                cases.append({
+                    'name': case_name,
+                    'description': content,
+                    'full_content': content,
+                    'case_type': 'condition',
+                    'keywords': self._extract_case_keywords(case_name, content)
+                })
+
+        return cases if len(cases) >= 2 else []
+
+    def _parse_numbered_with_bullets(self, answer):
+        """Parse FAQs có numbered sections với bullets bên trong (e.g., Bước 1: ... - item)"""
+        # This handles cases like:
+        # Bước 1: Title
+        # - Bullet 1
+        # - Bullet 2
+        # Bước 2: Title
+        # - Bullet 3
+
+        # First try: Split by "Bước N:"
+        step_sections = re.split(r'\n+(?=Bước\s+\d+:)', answer, flags=re.IGNORECASE)
+
+        if len(step_sections) >= 2:
+            cases = []
+            for section in step_sections:
+                section = section.strip()
+                if not section or len(section) < 20:
+                    continue
+
+                # Extract step name
+                step_match = re.match(r'(Bước\s+\d+[^:\n]*)', section, re.IGNORECASE)
+
+                if step_match:
+                    case_name = step_match.group(1).strip()
+
+                    # Remove trailing colon
+                    case_name = re.sub(r':$', '', case_name)
+
+                    cases.append({
+                        'name': case_name,
+                        'description': section,
+                        'full_content': section,
+                        'case_type': 'condition',
+                        'keywords': self._extract_case_keywords(case_name, section)
+                    })
+
+            if len(cases) >= 2:
+                return cases
+
+        # Second try: Return bullet points as cases (fallback)
+        return self._parse_bullet_conditions(answer)
+
+    def _extract_case_keywords(self, name, description):
+        """Extract matching keywords from case name and description"""
+        keywords = []
+        text_lower = (name + ' ' + description).lower()
+
+        # Method keywords
+        method_keywords = [
+            'chuyển khoản', 'liên kết', 'ngân hàng liên kết', 'tài khoản liên kết',
+            'qr', 'qr code', 'qr đa năng', 'mã qr',
+            'ví điện tử', 'tài khoản ví', 'ví',
+            'thẻ', 'thẻ ngân hàng', 'thẻ atm'
+        ]
+
+        # Status keywords
+        status_keywords = [
+            'thành công', 'thất bại', 'không thành công',
+            'đang xử lý', 'đang chờ', 'chờ xử lý',
+            'đã nhận được tiền', 'đã nhận tiền', 'nhận được tiền',
+            'chưa nhận được tiền', 'chưa nhận tiền'
+        ]
+
+        # Conditional keywords
+        conditional_keywords = [
+            'nếu', 'trường hợp', 'điều kiện',
+            'khi', 'lúc', 'thì'
+        ]
+
+        all_keywords = method_keywords + status_keywords + conditional_keywords
+
+        for kw in all_keywords:
+            if kw in text_lower:
+                keywords.append(kw)
+
+        return keywords
+
+    def _detect_case_type_and_status(self, name, description, default_type):
+        """Detect case type and status values from content"""
+        text_lower = (name + ' ' + description).lower()
+
+        # Detect type
+        if 'nếu' in text_lower[:10]:  # "Nếu" at start
+            case_type = 'if_then'
+        elif any(word in text_lower for word in ['chuyển khoản', 'liên kết', 'qr', 'ví']):
+            case_type = 'method'
+        elif any(word in text_lower for word in ['thành công', 'thất bại', 'đang xử lý']):
+            case_type = 'status'
+        else:
+            case_type = default_type
+
+        # Detect status values
+        status_values = []
+        if 'thành công' in text_lower and 'không thành công' not in text_lower:
+            status_values.append('thành công')
+        if 'thất bại' in text_lower or 'không thành công' in text_lower:
+            status_values.append('thất bại')
+        if 'đang xử lý' in text_lower or 'chờ xử lý' in text_lower:
+            status_values.append('đang xử lý')
+        if 'đã nhận được tiền' in text_lower or 'đã nhận tiền' in text_lower:
+            status_values.append('đã nhận tiền')
+        if 'chưa nhận được tiền' in text_lower or 'chưa nhận tiền' in text_lower:
+            status_values.append('chưa nhận tiền')
+
+        return case_type, status_values
 
     def create_case_nodes(self, dry_run=True):
         """Tạo Case nodes trong Neo4j"""
@@ -212,6 +475,13 @@ class AutoCaseNodeCreator:
                 for i, case in enumerate(cases, 1):
                     case_id = f"faq_{question[:20].replace(' ', '_')}_{i}"
 
+                    # Detect refined case_type and status_values
+                    refined_type, status_values = self._detect_case_type_and_status(
+                        case['name'],
+                        case['description'],
+                        case['case_type']
+                    )
+
                     create_case_query = '''
                     MATCH (faq:FAQ)
                     WHERE faq.question = $question
@@ -219,7 +489,9 @@ class AutoCaseNodeCreator:
                         case_id: $case_id,
                         name: $name,
                         description: $description,
-                        case_type: $case_type
+                        case_type: $case_type,
+                        keywords: $keywords,
+                        status_values: $status_values
                     })
                     CREATE (faq)-[:HAS_CASE]->(case)
                     RETURN case.name as case_name
@@ -230,7 +502,9 @@ class AutoCaseNodeCreator:
                         'case_id': case_id,
                         'name': case['name'],
                         'description': case['description'],
-                        'case_type': case['case_type']
+                        'case_type': refined_type,
+                        'keywords': case.get('keywords', []),
+                        'status_values': status_values
                     }
 
                     result = self.connector.execute_query(create_case_query, params, write=True)

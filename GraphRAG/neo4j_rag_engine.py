@@ -38,6 +38,13 @@ class Neo4jGraphRAGEngine:
         self.step_extractor = StepExtractor(neo4j_connector=self.connector)
         logger.info("Step extractor initialized")
 
+        # Initialize hybrid entity matcher (NEW!)
+        self.hybrid_matcher = None
+        if config.USE_HYBRID_ENTITY_MATCHING:
+            from hybrid_entity_matcher import HybridEntityMatcher
+            self.hybrid_matcher = HybridEntityMatcher(use_semantic=config.HYBRID_ENTITY_USE_SEMANTIC)
+            logger.info("✅ Hybrid entity matcher initialized (rule-based + semantic)")
+
         # Query cache
         self.cache = {}
 
@@ -390,7 +397,7 @@ class Neo4jGraphRAGEngine:
              // Count exact matches vs partial matches
              size([e_name IN matched_entities WHERE e_name IN $entity_names]) as exact_matches
 
-        // ENTITY-SPECIFIC FILTERING: Check ALL entity type matches (EXPANDED!)
+        // ENTITY-SPECIFIC FILTERING: Check ALL 15 entity type matches
         OPTIONAL MATCH (f)-[:MENTIONS_SERVICE]->(s:Service)
         OPTIONAL MATCH (f)-[:MENTIONS_BANK]->(b:Bank)
         OPTIONAL MATCH (f)-[:DESCRIBES_ERROR]->(err:Error)
@@ -400,6 +407,12 @@ class Neo4jGraphRAGEngine:
         OPTIONAL MATCH (f)-[:HAS_LIMIT]->(lim:Limit)
         OPTIONAL MATCH (f)-[:HAS_STATUS]->(stat:Status)
         OPTIONAL MATCH (f)-[:REQUIRES]->(req:Requirement)
+        OPTIONAL MATCH (f)-[:ABOUT]->(topic:Topic)
+        OPTIONAL MATCH (f)-[:HAS_TIMEFRAME]->(tf:TimeFrame)
+        OPTIONAL MATCH (f)-[:REQUIRES_DOCUMENT]->(doc:Document)
+        OPTIONAL MATCH (f)-[:AFFECTS_ACCOUNT]->(acc:AccountType)
+        OPTIONAL MATCH (f)-[:NAVIGATES_TO]->(ui:UIElement)
+        OPTIONAL MATCH (f)-[:CONTACTS]->(contact:ContactChannel)
 
         WITH f, entity_matches, rel_types, entity_types, matched_entities, exact_matches,
              collect(DISTINCT s.name) as faq_services,
@@ -410,12 +423,20 @@ class Neo4jGraphRAGEngine:
              collect(DISTINCT fee.name) as faq_fees,
              collect(DISTINCT lim.name) as faq_limits,
              collect(DISTINCT stat.name) as faq_statuses,
-             collect(DISTINCT req.name) as faq_requirements
+             collect(DISTINCT req.name) as faq_requirements,
+             collect(DISTINCT topic.name) as faq_topics,
+             collect(DISTINCT tf.name) as faq_timeframes,
+             collect(DISTINCT doc.name) as faq_documents,
+             collect(DISTINCT acc.name) as faq_account_types,
+             collect(DISTINCT ui.name) as faq_ui_elements,
+             collect(DISTINCT contact.name) as faq_contact_channels
 
-        // Calculate ALL entity match bonuses (EXPANDED!)
+        // Calculate ALL entity match bonuses (ALL 15 types!)
         WITH f, entity_matches, rel_types, entity_types, matched_entities, exact_matches,
              faq_services, faq_banks, faq_errors, faq_actions, faq_features,
              faq_fees, faq_limits, faq_statuses, faq_requirements,
+             faq_topics, faq_timeframes, faq_documents, faq_account_types,
+             faq_ui_elements, faq_contact_channels,
              // BOOST if FAQ has the EXACT Service entity from query
              CASE
                WHEN size($query_services) > 0 AND
@@ -549,6 +570,21 @@ class Neo4jGraphRAGEngine:
             logger.warning(f"No graph results found for entities: {all_entities}")
             return []
 
+        # Recalculate bonuses with hybrid matcher (if enabled)
+        if config.USE_HYBRID_ENTITY_MATCHING and self.hybrid_matcher:
+            results = self._recalculate_bonuses_with_hybrid(
+                results=results,
+                query_entities=query_entities,
+                services=services,
+                banks=banks,
+                errors=errors,
+                actions=actions,
+                features=features,
+                fees=fees,
+                statuses=statuses,
+                limits=limits
+            )
+
         # Normalize scores
         max_score = max([r["graph_score"] for r in results]) if results else 1.0
 
@@ -584,6 +620,266 @@ class Neo4jGraphRAGEngine:
             }
             for r in results
         ]
+
+    def _recalculate_bonuses_with_hybrid(
+        self,
+        results: List[Dict],
+        query_entities: Dict,
+        services: List[str],
+        banks: List[str],
+        errors: List[str],
+        actions: List[str],
+        features: List[str],
+        fees: List[str],
+        statuses: List[str],
+        limits: List[str]
+    ) -> List[Dict]:
+        """
+        Recalculate entity match bonuses using hybrid matcher (rule-based + semantic)
+
+        This replaces the Cypher-based bonus calculations with Python-based hybrid matching
+        for better synonym and semantic understanding.
+
+        Args:
+            results: Results from Cypher query (with Cypher-calculated bonuses)
+            query_entities: Original query entities
+            services, banks, errors, etc.: Entity lists from query
+
+        Returns:
+            Results with hybrid-calculated bonuses and updated scores
+        """
+        if not self.hybrid_matcher or not results:
+            return results
+
+        logger.info("🎯 Recalculating entity bonuses with hybrid matcher")
+
+        # For each FAQ result, get its entities and recalculate bonuses
+        for r in results:
+            faq_id = r.get("id")
+
+            # Query Neo4j to get FAQ's entities (ALL 15 types!)
+            cypher = """
+            MATCH (f:FAQ {id: $faq_id})
+            OPTIONAL MATCH (f)-[:MENTIONS_SERVICE]->(s:Service)
+            OPTIONAL MATCH (f)-[:MENTIONS_BANK]->(b:Bank)
+            OPTIONAL MATCH (f)-[:DESCRIBES_ERROR]->(err:Error)
+            OPTIONAL MATCH (f)-[:SUGGESTS_ACTION]->(act:Action)
+            OPTIONAL MATCH (f)-[:USES_FEATURE]->(feat:Feature)
+            OPTIONAL MATCH (f)-[:HAS_FEE]->(fee:Fee)
+            OPTIONAL MATCH (f)-[:HAS_STATUS]->(stat:Status)
+            OPTIONAL MATCH (f)-[:HAS_LIMIT]->(lim:Limit)
+            OPTIONAL MATCH (f)-[:ABOUT]->(topic:Topic)
+            OPTIONAL MATCH (f)-[:REQUIRES]->(req:Requirement)
+            OPTIONAL MATCH (f)-[:HAS_TIMEFRAME]->(tf:TimeFrame)
+            OPTIONAL MATCH (f)-[:REQUIRES_DOCUMENT]->(doc:Document)
+            OPTIONAL MATCH (f)-[:AFFECTS_ACCOUNT]->(acc:AccountType)
+            OPTIONAL MATCH (f)-[:NAVIGATES_TO]->(ui:UIElement)
+            OPTIONAL MATCH (f)-[:CONTACTS]->(contact:ContactChannel)
+            RETURN
+                collect(DISTINCT s.name) as faq_services,
+                collect(DISTINCT b.name) as faq_banks,
+                collect(DISTINCT err.name) as faq_errors,
+                collect(DISTINCT act.name) as faq_actions,
+                collect(DISTINCT feat.name) as faq_features,
+                collect(DISTINCT fee.name) as faq_fees,
+                collect(DISTINCT stat.name) as faq_statuses,
+                collect(DISTINCT lim.name) as faq_limits,
+                collect(DISTINCT topic.name) as faq_topics,
+                collect(DISTINCT req.name) as faq_requirements,
+                collect(DISTINCT tf.name) as faq_timeframes,
+                collect(DISTINCT doc.name) as faq_documents,
+                collect(DISTINCT acc.name) as faq_account_types,
+                collect(DISTINCT ui.name) as faq_ui_elements,
+                collect(DISTINCT contact.name) as faq_contact_channels
+            """
+
+            faq_entities_result = self.connector.execute_query(cypher, {"faq_id": faq_id})
+
+            if not faq_entities_result:
+                continue
+
+            faq_entities = faq_entities_result[0]
+
+            # Calculate hybrid bonuses
+            service_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=services,
+                faq_entities=faq_entities["faq_services"],
+                entity_type="Service"
+            ) if services or faq_entities["faq_services"] else 0.0
+
+            bank_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=banks,
+                faq_entities=faq_entities["faq_banks"],
+                entity_type="Bank"
+            ) if banks or faq_entities["faq_banks"] else 0.0
+
+            error_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=errors,
+                faq_entities=faq_entities["faq_errors"],
+                entity_type="Error"
+            ) if errors or faq_entities["faq_errors"] else 0.0
+
+            action_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=actions,
+                faq_entities=faq_entities["faq_actions"],
+                entity_type="Action"
+            ) if actions or faq_entities["faq_actions"] else 0.0
+
+            feature_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=features,
+                faq_entities=faq_entities["faq_features"],
+                entity_type="Feature"
+            ) if features or faq_entities["faq_features"] else 0.0
+
+            fee_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=fees,
+                faq_entities=faq_entities["faq_fees"],
+                entity_type="Fee"
+            ) if fees or faq_entities["faq_fees"] else 0.0
+
+            status_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=statuses,
+                faq_entities=faq_entities["faq_statuses"],
+                entity_type="Status"
+            ) if statuses or faq_entities["faq_statuses"] else 0.0
+
+            limit_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=limits,
+                faq_entities=faq_entities["faq_limits"],
+                entity_type="Limit"
+            ) if limits or faq_entities["faq_limits"] else 0.0
+
+            # NEW: Calculate bonuses for 7 additional entity types
+            topic_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("Topic", []),
+                faq_entities=faq_entities["faq_topics"],
+                entity_type="Topic"
+            ) if query_entities.get("Topic") or faq_entities["faq_topics"] else 0.0
+
+            requirement_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("Requirement", []),
+                faq_entities=faq_entities["faq_requirements"],
+                entity_type="Requirement"
+            ) if query_entities.get("Requirement") or faq_entities["faq_requirements"] else 0.0
+
+            timeframe_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("TimeFrame", []),
+                faq_entities=faq_entities["faq_timeframes"],
+                entity_type="TimeFrame"
+            ) if query_entities.get("TimeFrame") or faq_entities["faq_timeframes"] else 0.0
+
+            document_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("Document", []),
+                faq_entities=faq_entities["faq_documents"],
+                entity_type="Document"
+            ) if query_entities.get("Document") or faq_entities["faq_documents"] else 0.0
+
+            account_type_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("AccountType", []),
+                faq_entities=faq_entities["faq_account_types"],
+                entity_type="AccountType"
+            ) if query_entities.get("AccountType") or faq_entities["faq_account_types"] else 0.0
+
+            ui_element_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("UIElement", []),
+                faq_entities=faq_entities["faq_ui_elements"],
+                entity_type="UIElement"
+            ) if query_entities.get("UIElement") or faq_entities["faq_ui_elements"] else 0.0
+
+            contact_channel_bonus = self.hybrid_matcher.get_entity_bonus(
+                query_entities=query_entities.get("ContactChannel", []),
+                faq_entities=faq_entities["faq_contact_channels"],
+                entity_type="ContactChannel"
+            ) if query_entities.get("ContactChannel") or faq_entities["faq_contact_channels"] else 0.0
+
+            # Get base components from Cypher result
+            entity_matches = r.get("entity_matches", 0)
+            rel_types = r.get("rel_types", [])
+            exact_matches = r.get("exact_matches", 0) if "exact_matches" in r else 0
+
+            # Calculate rel_weight (same logic as Cypher)
+            rel_weight = 1.0
+            if 'DESCRIBES_ERROR' in rel_types:
+                rel_weight = 1.5
+            elif 'ABOUT' in rel_types or 'MENTIONS_BANK' in rel_types or 'MENTIONS_SERVICE' in rel_types:
+                rel_weight = 1.5
+            elif 'SUGGESTS_ACTION' in rel_types:
+                rel_weight = 1.2
+
+            exact_match_bonus = exact_matches * 0.5
+
+            # Recalculate graph_score with HYBRID bonuses (ALL 15 entity types!)
+            old_graph_score = r.get("graph_score", 0)
+            new_graph_score = (
+                entity_matches * rel_weight +
+                exact_match_bonus +
+                service_bonus +
+                bank_bonus +
+                error_bonus +
+                action_bonus +
+                feature_bonus +
+                fee_bonus +
+                status_bonus +
+                limit_bonus +
+                topic_bonus +
+                requirement_bonus +
+                timeframe_bonus +
+                document_bonus +
+                account_type_bonus +
+                ui_element_bonus +
+                contact_channel_bonus
+            )
+
+            # Update result with ALL 15 entity bonuses
+            r["graph_score"] = new_graph_score
+            r["service_match_bonus"] = service_bonus
+            r["bank_match_bonus"] = bank_bonus
+            r["error_match_bonus"] = error_bonus
+            r["action_match_bonus"] = action_bonus
+            r["feature_match_bonus"] = feature_bonus
+            r["fee_match_bonus"] = fee_bonus
+            r["status_match_bonus"] = status_bonus
+            r["limit_match_bonus"] = limit_bonus
+            r["topic_match_bonus"] = topic_bonus
+            r["requirement_match_bonus"] = requirement_bonus
+            r["timeframe_match_bonus"] = timeframe_bonus
+            r["document_match_bonus"] = document_bonus
+            r["account_type_match_bonus"] = account_type_bonus
+            r["ui_element_match_bonus"] = ui_element_bonus
+            r["contact_channel_match_bonus"] = contact_channel_bonus
+
+            # Log significant changes (show ALL bonuses > 0)
+            if abs(new_graph_score - old_graph_score) > 0.5:
+                logger.info(f"  📊 FAQ {faq_id}: Cypher={old_graph_score:.2f} → Hybrid={new_graph_score:.2f} "
+                          f"(Δ={new_graph_score - old_graph_score:+.2f})")
+
+                # Build bonus list dynamically (only show non-zero bonuses)
+                all_bonuses = [
+                    ("service", service_bonus),
+                    ("bank", bank_bonus),
+                    ("error", error_bonus),
+                    ("action", action_bonus),
+                    ("feature", feature_bonus),
+                    ("fee", fee_bonus),
+                    ("status", status_bonus),
+                    ("limit", limit_bonus),
+                    ("topic", topic_bonus),
+                    ("requirement", requirement_bonus),
+                    ("timeframe", timeframe_bonus),
+                    ("document", document_bonus),
+                    ("account_type", account_type_bonus),
+                    ("ui_element", ui_element_bonus),
+                    ("contact", contact_channel_bonus)
+                ]
+
+                bonus_parts = [f"{name}={value:.1f}" for name, value in all_bonuses if value > 0]
+                if bonus_parts:
+                    logger.info(f"     Bonuses: {', '.join(bonus_parts)}")
+
+        # Re-sort by new graph_score
+        results.sort(key=lambda x: x.get("graph_score", 0), reverse=True)
+
+        return results
 
     def _semantic_search(self, query: str, top_k: int) -> List[Dict]:
         """Search using semantic similarity (cosine similarity with embeddings)"""
@@ -795,6 +1091,8 @@ class Neo4jGraphRAGEngine:
                    case.description as case_description,
                    case.case_type as case_type,
                    case.method as case_method,
+                   case.keywords as keywords,
+                   case.status_values as status_values,
                    collect({number: step.number, text: step.text}) as steps
             ORDER BY case.case_id
             """
@@ -830,8 +1128,12 @@ class Neo4jGraphRAGEngine:
             case_steps = []
 
             if case_results:  # Check if FAQ has Case nodes
-                # Match Case based on query keywords
+                # Match Case based on EXTRACTED ENTITIES (Feature) + query keywords
                 query_lower = user_query.lower()
+
+                # Extract Feature entities for case matching (FIXED: Use correct key 'Feature')
+                extracted_features = query_entities.get('Feature', []) if query_entities else []
+                logger.info(f"📋 Extracted features for case matching: {extracted_features}")
 
                 # Scoring for each case
                 case_scores = []
@@ -841,14 +1143,84 @@ class Neo4jGraphRAGEngine:
                     case_desc = (case.get('case_description') or '').lower()
                     case_method = (case.get('case_method') or '').lower()
 
-                    # Keyword matching for "liên kết trực tiếp" vs "chuyển khoản"
-                    if 'liên kết' in query_lower or 'liên kết trực tiếp' in query_lower:
-                        if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
-                            score += 10
+                    # Get new Case fields from Neo4j
+                    case_keywords = case.get('keywords', [])
+                    case_status_values = case.get('status_values', [])
 
-                    if 'chuyển khoản' in query_lower or 'qr' in query_lower or 'mã qr' in query_lower:
-                        if 'chuyển khoản' in case_name or 'chuyển khoản' in case_desc or 'qr' in case_method:
-                            score += 10
+                    # PRIORITY 1: Match with extracted Feature entities (HIGHER SCORE)
+                    for feature in extracted_features:
+                        feature_lower = feature.lower()
+
+                        # Match "liên kết ngân hàng" or "ngân hàng liên kết"
+                        if 'liên kết' in feature_lower and 'ngân hàng' in feature_lower:
+                            if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
+                                score += 15  # Higher priority than keywords
+                                logger.info(f"  ✅ Feature match 'liên kết ngân hàng': {case_name}")
+
+                        # Match "Chuyển khoản ngân hàng"
+                        elif 'chuyển khoản' in feature_lower and 'ngân hàng' in feature_lower:
+                            if 'chuyển khoản' in case_name or 'chuyển khoản' in case_desc or 'qr' in case_name:
+                                score += 15
+                                logger.info(f"  ✅ Feature match 'Chuyển khoản ngân hàng': {case_name}")
+
+                        # Match "QR code" or "mã QR"
+                        elif 'qr' in feature_lower:
+                            if 'qr' in case_name or 'qr' in case_desc or 'chuyển khoản' in case_name:
+                                score += 15
+                                logger.info(f"  ✅ Feature match 'QR': {case_name}")
+
+                    # PRIORITY 2: Status-based matching (NEW - using status_values field)
+                    extracted_status = query_entities.get('Status', []) if query_entities else []
+
+                    if extracted_status and case_status_values:
+                        for status in extracted_status:
+                            status_lower = status.lower()
+
+                            # Match "thành công"
+                            if 'thành công' in status_lower:
+                                if 'thành công' in case_status_values:
+                                    score += 20
+                                    logger.info(f"  ✅ Status match 'thành công': {case_name}")
+
+                            # Match "thất bại" or "không thành công"
+                            elif any(word in status_lower for word in ['thất bại', 'không thành công', 'lỗi']):
+                                if 'thất bại' in case_status_values:
+                                    score += 20
+                                    logger.info(f"  ✅ Status match 'thất bại': {case_name}")
+
+                            # Match "đang xử lý"
+                            elif 'đang xử lý' in status_lower or 'chờ xử lý' in status_lower:
+                                if 'đang xử lý' in case_status_values:
+                                    score += 20
+                                    logger.info(f"  ✅ Status match 'đang xử lý': {case_name}")
+
+                    # PRIORITY 3: Conditional matching (NEW - "đã nhận" vs "chưa nhận" tiền)
+                    if 'đã nhận được tiền' in query_lower or 'đã nhận tiền' in query_lower:
+                        if case_status_values and 'đã nhận tiền' in case_status_values:
+                            score += 25  # Highest priority for conditional
+                            logger.info(f"  ✅ Conditional match 'đã nhận tiền': {case_name}")
+
+                    elif 'chưa nhận được tiền' in query_lower or 'chưa nhận tiền' in query_lower:
+                        if case_status_values and 'chưa nhận tiền' in case_status_values:
+                            score += 25
+                            logger.info(f"  ✅ Conditional match 'chưa nhận tiền': {case_name}")
+
+                    # PRIORITY 4: Keyword-based matching (NEW - using keywords field as fallback)
+                    if score < 10 and case_keywords:  # Only if no strong match yet
+                        for keyword in case_keywords:
+                            if isinstance(keyword, str) and keyword in query_lower:
+                                score += 5
+                                logger.info(f"  ⚡ Keyword match '{keyword}': {case_name}")
+
+                    # PRIORITY 5: Fallback to old keyword matching
+                    if score == 0:  # Only if nothing else matched
+                        if 'liên kết' in query_lower or 'liên kết trực tiếp' in query_lower:
+                            if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
+                                score += 10
+
+                        if 'chuyển khoản' in query_lower or 'qr' in query_lower or 'mã qr' in query_lower:
+                            if 'chuyển khoản' in case_name or 'chuyển khoản' in case_desc or 'qr' in case_method:
+                                score += 10
 
                     # Default: first case gets small bonus
                     if case == case_results[0]:
@@ -884,8 +1256,28 @@ class Neo4jGraphRAGEngine:
                 ])
                 case_name = selected_case.get('name', '')
                 case_based_answer = f"{case_name}:\n\n{steps_text}"
+            elif selected_case and selected_case.get('description'):
+                # FALLBACK: If Case has description but no Step nodes, use description
+                case_desc = selected_case.get('description', '')
+                # Description already includes case name, so use it directly
+                case_based_answer = case_desc
+                logger.info(f"Using Case description (no Step nodes found)")
             else:
-                case_based_answer = faq.get("answer", "")
+                # NO Case nodes - but check if we have Feature entities to filter answer
+                full_answer = faq.get("answer", "")
+                extracted_features = query_entities.get('Feature', []) if query_entities else []
+
+                if extracted_features and full_answer:
+                    # Try to extract the matching case section from the answer
+                    case_based_answer = self._extract_matching_case_from_answer(
+                        full_answer, extracted_features, user_query
+                    )
+                    if case_based_answer and case_based_answer != full_answer:
+                        logger.info(f"✂️ Extracted matching case from multi-case answer")
+                    else:
+                        case_based_answer = full_answer
+                else:
+                    case_based_answer = full_answer
 
             context_item = {
                 "question_id": node_id,
@@ -914,6 +1306,122 @@ class Neo4jGraphRAGEngine:
             context.append(context_item)
 
         return context
+
+    def _extract_matching_case_from_answer(self, answer: str, features: List[str], query: str) -> str:
+        """
+        Extract the matching case section from a multi-case answer.
+
+        When variant FAQs don't have Case nodes, this parses the answer to find
+        the case that matches the Feature entities.
+
+        Format expected:
+        - Case 1 name:
+          Steps...
+        - Case 2 name:
+          Steps...
+        """
+        # Split answer into case sections (starts with "- ")
+        lines = answer.split('\n')
+        cases = []
+        current_case = []
+        current_case_name = None
+
+        for line in lines:
+            # Check if line starts a new case (e.g., "- Nạp tiền từ ngân hàng liên kết:")
+            if line.strip().startswith('- '):
+                # Save previous case
+                if current_case and current_case_name:
+                    cases.append((current_case_name, '\n'.join(current_case)))
+                # Start new case
+                current_case_name = line.strip()[2:]  # Remove "- " prefix
+                current_case = [line]
+            else:
+                # Continue current case
+                if current_case is not None:
+                    current_case.append(line)
+
+        # Save last case
+        if current_case and current_case_name:
+            cases.append((current_case_name, '\n'.join(current_case)))
+
+        # No cases found, return full answer
+        if not cases:
+            return answer
+
+        # Match case name with Feature entities
+        query_lower = query.lower()
+        for feature in features:
+            feature_lower = feature.lower()
+
+            # Check each case name
+            for case_name, case_content in cases:
+                case_name_lower = case_name.lower()
+
+                # Match "Chuyển khoản ngân hàng"
+                if 'chuyển khoản' in feature_lower:
+                    if 'chuyển khoản' in case_name_lower:
+                        logger.info(f"  📌 Matched case by feature 'chuyển khoản': {case_name[:50]}...")
+                        return case_content
+
+                # Match "liên kết ngân hàng" or "tài khoản liên kết"
+                elif 'liên kết' in feature_lower:
+                    if 'liên kết' in case_name_lower:
+                        logger.info(f"  📌 Matched case by feature 'liên kết': {case_name[:50]}...")
+                        return case_content
+
+                # Match "QR"
+                elif 'qr' in feature_lower:
+                    if 'qr' in case_name_lower:
+                        logger.info(f"  📌 Matched case by feature 'QR': {case_name[:50]}...")
+                        return case_content
+
+        # No feature match - try status/conditional matching (NEW)
+        for case_name, case_content in cases:
+            case_content_lower = case_content.lower()
+
+            # Match status-based cases
+            if 'thành công' in query_lower and 'không thành công' not in query_lower:
+                if 'thành công' in case_content_lower and 'không thành công' not in case_content_lower:
+                    logger.info(f"  📌 Matched case by status 'thành công': {case_name[:50]}...")
+                    return case_content
+
+            if 'thất bại' in query_lower or 'không thành công' in query_lower:
+                if 'thất bại' in case_content_lower or 'không thành công' in case_content_lower:
+                    logger.info(f"  📌 Matched case by status 'thất bại': {case_name[:50]}...")
+                    return case_content
+
+            if 'đang xử lý' in query_lower:
+                if 'đang xử lý' in case_content_lower:
+                    logger.info(f"  📌 Matched case by status 'đang xử lý': {case_name[:50]}...")
+                    return case_content
+
+        # Match conditional cases ("đã nhận" vs "chưa nhận" tiền) (NEW)
+        if 'đã nhận được tiền' in query_lower or 'đã nhận tiền' in query_lower:
+            for case_name, case_content in cases:
+                if 'đã nhận được tiền' in case_content.lower() or 'đã nhận tiền' in case_content.lower():
+                    logger.info(f"  📌 Matched case by condition 'đã nhận tiền': {case_name[:50]}...")
+                    return case_content
+
+        elif 'chưa nhận được tiền' in query_lower or 'chưa nhận tiền' in query_lower:
+            for case_name, case_content in cases:
+                if 'chưa nhận được tiền' in case_content.lower() or 'chưa nhận tiền' in case_content.lower():
+                    logger.info(f"  📌 Matched case by condition 'chưa nhận tiền': {case_name[:50]}...")
+                    return case_content
+
+        # Fallback to keyword matching in query
+        for case_name, case_content in cases:
+            case_name_lower = case_name.lower()
+
+            if 'chuyển khoản' in query_lower and 'chuyển khoản' in case_name_lower:
+                logger.info(f"  📌 Matched case by query keyword 'chuyển khoản': {case_name[:50]}...")
+                return case_content
+
+            if 'liên kết' in query_lower and 'liên kết' in case_name_lower:
+                logger.info(f"  📌 Matched case by query keyword 'liên kết': {case_name[:50]}...")
+                return case_content
+
+        # No match - return full answer
+        return answer
 
     def _get_alternative_actions(self, actions: List[str]) -> List[Dict]:
         """Get alternative actions for given actions"""
@@ -1193,8 +1701,9 @@ class Neo4jGraphRAGEngine:
                 logger.info(f"   Query mode: ALL REMAINING STEPS (from step {from_step})")
 
             # CRITICAL: Query BOTH the requested steps AND the total count
+            # CRITICAL FIX: Use faq_id (not question_id) to match Neo4j schema
             cypher = f"""
-            MATCH (faq:FAQ {{question_id: $faq_id}})-[:DESCRIBES_PROCESS]->(p:Process)
+            MATCH (faq:FAQ {{id: $faq_id}})-[:DESCRIBES_PROCESS]->(p:Process)
             MATCH (p)-[:HAS_STEP]->(all_s:Step)
             WITH faq, p, count(all_s) as total_count
             MATCH (p)-[:HAS_STEP]->(s:Step)
@@ -1216,8 +1725,9 @@ class Neo4jGraphRAGEngine:
                 logger.warning(f"No steps found for FAQ ID: {faq_id}")
 
                 # FALLBACK 1: Try to get total count for this FAQ_ID
+                # CRITICAL FIX: Use faq_id (not question_id) to match Neo4j schema
                 count_cypher = """
-                MATCH (faq:FAQ {question_id: $faq_id})-[:DESCRIBES_PROCESS]->(p:Process)
+                MATCH (faq:FAQ {id: $faq_id})-[:DESCRIBES_PROCESS]->(p:Process)
                 MATCH (p)-[:HAS_STEP]->(s:Step)
                 RETURN count(s) as total_count
                 """

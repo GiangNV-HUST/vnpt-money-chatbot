@@ -154,15 +154,33 @@ class LLMEntityExtractor:
    - Ví dụ: "thông tin thẻ/tài khoản không hợp lệ", "Không nhận được OTP", "Quá hạn mức"
    - **LƯU Ý**: Ưu tiên lấy text trong dấu ngoặc kép "", nếu không có thì lấy toàn bộ mô tả lỗi
 
-5. **Action**: Hành động mà người dùng cần thực hiện
-   - Ví dụ: "Nạp tiền", "Rút tiền", "Liên kết ngân hàng", "Hủy liên kết", "Chọn Cá nhân", "Nhập số tiền"
+5. **Action**: Hành động mà người dùng cần thực hiện (các bước cụ thể trong UI)
+   - Ví dụ: "Chọn Cá nhân", "Nhập số tiền", "Nhấn Xác nhận", "Chọn ngân hàng", "Nhập OTP"
    - **LƯU Ý**: Với hướng dẫn từng bước, tách mỗi bước thành một Action riêng
+   - **PHÂN BIỆT với Feature**: Action là thao tác UI cụ thể, Feature là phương thức/tính năng của hệ thống
 
 6. **Requirement**: Điều kiện cần thiết để thực hiện hành động
    - Ví dụ: "Đăng ký dịch vụ thanh toán trực tuyến", "Có số dư tối thiểu", "Thông tin trùng khớp"
 
-7. **Feature**: Tính năng/công cụ của ứng dụng
-   - Ví dụ: "QR đa năng", "OTP", "Tra soát giao dịch", "Lịch sử giao dịch", "NFC"
+7. **Feature**: Tính năng/công cụ/phương thức của ứng dụng (KHÔNG phải hành động người dùng)
+   - Ví dụ công cụ/tính năng: "QR đa năng", "OTP", "Tra soát giao dịch", "Lịch sử giao dịch", "NFC", "Sinh trắc học"
+   - **QUAN TRỌNG**: Bao gồm cả **phương thức thanh toán/giao dịch cụ thể**:
+     * "ngân hàng liên kết", "liên kết ngân hàng", "tài khoản liên kết" (phương thức nạp/rút từ tài khoản bank đã liên kết)
+     * "QR code", "mã QR", "QR đa năng" (phương thức thanh toán bằng quét mã)
+     * "Chuyển khoản ngân hàng" (phương thức chuyển tiền qua bank - KHÔNG PHẢI qua liên kết)
+     * "ví điện tử", "tài khoản ví" (phương thức thanh toán qua ví)
+   - **NHẬN DIỆN Feature trong câu** (QUAN TRỌNG - ƯU TIÊN):
+     * **LUÔN LUÔN** extract Feature nếu có từ "bằng", "qua", "thông qua", "bằng cách", "sử dụng" + phương thức
+     * Ví dụ: "nạp tiền **bằng chuyển khoản ngân hàng**" → Feature: "Chuyển khoản ngân hàng" (KHÔNG phải Action!)
+     * Ví dụ: "thực hiện **bằng tài khoản liên kết**" → Feature: "liên kết ngân hàng"
+     * Ví dụ: "thanh toán **qua** QR" → Feature: "QR code"
+     * **LƯU Ý**: Khi có "bằng/qua/thông qua", text sau nó là Feature, KHÔNG phải Action
+   - **PHÂN BIỆT**:
+     * Feature = Phương thức/tính năng (vd: "ngân hàng liên kết", "QR code", "Chuyển khoản ngân hàng")
+     * Action = Thao tác UI (vd: "Chọn ngân hàng", "Nhập số tiền", "Nhấn Xác nhận")
+   - **Mục đích**: Giúp phân biệt các phương thức khác nhau trong cùng 1 dịch vụ
+     * "nạp tiền **bằng liên kết** ngân hàng" → Feature: "liên kết ngân hàng"
+     * "nạp tiền **bằng chuyển khoản** ngân hàng" → Feature: "Chuyển khoản ngân hàng"
 
 8. **TimeFrame**: Khung thời gian liên quan
    - Ví dụ: "2 ngày làm việc", "3 ngày làm việc", "45-60 ngày làm việc", "Ngay lập tức"
@@ -181,7 +199,11 @@ class LLMEntityExtractor:
     - Ví dụ: "Cá nhân", "Ngân hàng liên kết", "Chuyển tiền", "Trợ giúp", "Qua số tài khoản/số thẻ"
 
 13. **ContactChannel**: Kênh liên hệ hỗ trợ
-    - Ví dụ: "Trợ giúp", "Hotline", "Bộ phận hỗ trợ ngân hàng"
+    - Ví dụ: "Trợ giúp", "Hotline", "Bộ phận hỗ trợ ngân hàng", "Bộ phận chăm sóc khách hàng"
+    - **Bao gồm cả số điện thoại cụ thể của nhà mạng/ngân hàng**:
+      * "Vinaphone: 18001091", "Mobifone: 18001090", "Viettel: 18008098"
+      * Format: "<Tên nhà mạng/ngân hàng>: <Số điện thoại>"
+    - **Khi câu hỏi hỏi về số điện thoại/hotline của một nhà mạng cụ thể**, extract tên nhà mạng đó với số điện thoại
 
 14. **Fee**: Phí, chi phí, biểu phí, chính sách phí liên quan đến giao dịch/dịch vụ
     - Ví dụ: "phí rút tiền", "phí chuyển tiền", "phí dịch vụ", "biểu phí VNPT Money"

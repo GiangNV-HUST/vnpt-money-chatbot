@@ -56,6 +56,82 @@ class GraphRAGChatbot:
             logger.error(f"OpenAI initialization failed: {e}")
             raise
 
+    def _is_chitchat(self, message: str) -> bool:
+        """Check if message is chitchat/greeting (not FAQ-related)"""
+        import re
+
+        message_lower = message.lower().strip()
+
+        # CRITICAL FIX: Use word boundaries to prevent false positives
+        # Example: "tên bạn là gì?" should match, but "Họ tên bạn không trùng" should NOT
+
+        # Greeting patterns (use word boundaries)
+        greeting_patterns = [
+            r'\bxin chào\b', r'\bchào bạn\b', r'\bhello\b', r'\bhi\b',
+            r'^chào\b', r'\bchào$'  # "chào" at start or end only
+        ]
+
+        # Identity question patterns (more specific)
+        identity_patterns = [
+            r'\bbạn là ai\b', r'\bbạn là gì\b',
+            r'\btên bạn là\b', r'\btên bạn\?',  # "tên bạn là gì?" or "tên bạn?"
+            r'^tên bạn\b', # Only at start of message
+            r'\bai đây\b'
+        ]
+
+        # Thanks patterns
+        thanks_patterns = [
+            r'\bcảm ơn\b', r'\bcám ơn\b', r'\bthank\b', r'\bthanks\b'
+        ]
+
+        # Goodbye patterns
+        goodbye_patterns = [
+            r'\btạm biệt\b', r'\bbye\b', r'\bgoodbye\b'
+        ]
+
+        # Capability question patterns
+        capability_patterns = [
+            r'\bbạn làm được gì\b', r'\bbạn có thể làm gì\b', r'\bgiúp gì được\b'
+        ]
+
+        # Combine all patterns
+        all_patterns = (greeting_patterns + identity_patterns + thanks_patterns +
+                       goodbye_patterns + capability_patterns)
+
+        # Check if any pattern matches
+        for pattern in all_patterns:
+            if re.search(pattern, message_lower):
+                return True
+
+        return False
+
+    def _handle_chitchat(self, message: str) -> str:
+        """Handle chitchat/greeting messages"""
+        message_lower = message.lower().strip()
+
+        # Greetings
+        if any(x in message_lower for x in ["xin chào", "chào bạn", "hello", "hi ", "chào"]):
+            return "Xin chào! Tôi là VNPT Assistant, trợ lý ảo của VNPT Money. Tôi có thể giúp bạn giải đáp các thắc mắc về dịch vụ VNPT Money. Bạn cần hỗ trợ gì?"
+
+        # Identity
+        if any(x in message_lower for x in ["bạn là ai", "bạn là gì", "tên bạn", "ai đây"]):
+            return "Tôi là VNPT Assistant - trợ lý ảo thông minh của VNPT Money. Tôi được thiết kế để giúp bạn giải đáp các câu hỏi về dịch vụ ví điện tử VNPT Money, bao gồm: nạp tiền, rút tiền, chuyển tiền, liên kết ngân hàng và các tính năng khác. Bạn có câu hỏi gì về VNPT Money không?"
+
+        # Thanks
+        if any(x in message_lower for x in ["cảm ơn", "cám ơn", "thank"]):
+            return "Rất vui được hỗ trợ bạn! Nếu có thêm câu hỏi, đừng ngại hỏi tôi nhé!"
+
+        # Goodbyes
+        if any(x in message_lower for x in ["tạm biệt", "bye", "goodbye"]):
+            return "Tạm biệt! Chúc bạn một ngày tốt lành. Hẹn gặp lại!"
+
+        # Capability
+        if any(x in message_lower for x in ["bạn làm được gì", "bạn có thể làm gì", "giúp gì được"]):
+            return "Tôi có thể giúp bạn:\n- Hướng dẫn sử dụng các tính năng VNPT Money (nạp tiền, rút tiền, chuyển tiền, thanh toán hóa đơn...)\n- Giải quyết các vấn đề kỹ thuật (lỗi giao dịch, liên kết ngân hàng, định danh...)\n- Tư vấn về phí, hạn mức, điều kiện sử dụng\n- Và nhiều thông tin khác về VNPT Money!\n\nBạn cần hỗ trợ gì?"
+
+        # Default chitchat
+        return "Tôi là VNPT Assistant. Bạn có câu hỏi gì về dịch vụ VNPT Money không?"
+
     def chat(self, user_message: str) -> str:
         """
         Process user message and return response WITH CONTEXT AWARENESS
@@ -67,6 +143,12 @@ class GraphRAGChatbot:
             Chatbot response
         """
         logger.info(f"User: {user_message}")
+
+        # Step 0: Handle chitchat/greetings first (NEW)
+        if self._is_chitchat(user_message):
+            response = self._handle_chitchat(user_message)
+            logger.info(f"Assistant (chitchat): {response}")
+            return response
 
         # Step 1: Check for contextual references and enhance query
         enhanced_query, continuation_context = self.context_manager.enhance_query_with_context(user_message)
@@ -87,6 +169,8 @@ class GraphRAGChatbot:
             # Procedural FAQ - use original answer to preserve all steps
             logger.info(f"Procedural FAQ detected ({len(steps)} steps), using original answer")
             response = rag_result.get("answer", "")
+            # Apply formatting post-processor to improve readability
+            response = self._format_answer_for_readability(response)
         elif self.llm:
             # Non-procedural or no steps - use LLM for better formatting
             response = self._generate_llm_response(user_message, rag_result, continuation_context)
@@ -225,47 +309,78 @@ Hãy trả lời một cách thân thiện và lịch sự:
 """
 
         # Build final prompt with improved instructions
-        prompt = f"""Bạn là VNPT Assistant - trợ lý ảo của VNPT Money.
+        prompt = f"""Bạn là VNPT Assistant - trợ lý ảo của VNPT Money, nói chuyện TỰ NHIÊN như một người tư vấn viên thân thiện, KHÔNG phải là bot.
 
 🎯 NHIỆM VỤ:
-Trả lời câu hỏi dựa trên thông tin từ NGỮ CẢNH bên dưới.
+Trả lời câu hỏi dựa trên thông tin từ NGỮ CẢNH, nhưng phải VIẾT LẠI theo phong cách TỰ NHIÊN, THÂN THIỆN, DỄ HIỂU như đang tư vấn 1-1 cho khách hàng.
 
 📋 NGUYÊN TẮC (QUAN TRỌNG):
 1. **Nội dung**:
    - CHỈ sử dụng thông tin từ NGỮ CẢNH, KHÔNG bịa thêm
    - CHỈ trả lời ĐÚNG câu hỏi người dùng, KHÔNG thêm thông tin không liên quan
    - Nếu NGỮ CẢNH có nhiều FAQ: CHỈ dùng FAQ phù hợp nhất với câu hỏi
-2. **Format - NGẮN GỌN**:
-   - MỖI bước XUỐNG DÒNG riêng (Bước 1, Bước 2,...)
-   - KHÔNG dùng bullet points (•) trong mỗi bước
-   - Nội dung mỗi bước viết LIỀN MẠCH, ngắn gọn, không xuống dòng chi tiết con
+   - ⚠️ **QUAN TRỌNG - LỌC PHƯƠNG THỨC CỤ THỂ**:
+     * Nếu câu hỏi đề cập đến PHƯƠNG THỨC/TÍNH NĂNG CỤ THỂ (ví dụ: "ngân hàng liên kết", "QR code", "chuyển khoản", "ví điện tử")
+     * VÀ FAQ chứa NHIỀU phương thức/hình thức khác nhau
+     * Thì CHỈ trích xuất và trả lời về phương thức được hỏi, BỎ QUA các phương thức khác
+     * VÍ DỤ: Nếu hỏi "nạp tiền từ ngân hàng liên kết" → CHỈ trả lời về phương thức liên kết, KHÔNG kể "nạp bằng QR" hoặc phương thức khác
+
+2. **Giọng điệu - TỰ NHIÊN NHƯ NGƯỜI THẬT (⚠️ QUAN TRỌNG NHẤT)**:
+   - **TRÁNH ngôn ngữ cứng nhắc kiểu bot**: KHÔNG dùng "Bước 1, Bước 2, Bước 3" TRỪ KHI ngữ cảnh GỐC có sẵn
+   - **SỬ DỤNG chuyển tiếp tự nhiên**: "Đầu tiên...", "Tiếp theo...", "Sau đó...", "Cuối cùng..."
+   - **THÊM động viên và cảm xúc**: "đừng lo nhé", "rất đơn giản", "dễ dàng thôi", "chỉ cần..."
+   - **DÙNG ngôn ngữ thân mật**: "bạn", "mình", "nhé", "nha"
+   - **NÓI như đang tư vấn trực tiếp**: Mượt mà, thấu hiểu, không cứng nhắc
+
+   - **NẾU NGỮ CẢNH có "Bước 1, 2, 3"** → VIẾT LẠI tự nhiên hơn:
+     * THAY VÌ: "Bước 1: Chọn..., Bước 2: Nhập..., Bước 3: Xác nhận..."
+     * VIẾT THÀNH: "Đầu tiên, bạn cần chọn... Tiếp theo, bạn nhập... Sau đó xác nhận... Cuối cùng..."
+
+   - **NẾU NGỮ CẢNH KHÔNG có "Bước"** → Trả lời thông thường, tự nhiên
+     * Giải thích ngắn gọn, thân thiện
+     * KHÔNG tự ý thêm "Bước 1, 2, 3"
+
 3. **Phần "Lưu ý"**: CHỈ bao gồm nếu nó TRỰC TIẾP liên quan đến câu hỏi được hỏi
 4. **Icon/Emoji**: CÓ THỂ thêm icon thân thiện (⚠️ 💡 ✅ ❌ 📞) khi phù hợp để làm nổi bật thông tin quan trọng
 5. **KHÔNG thêm**: Câu mở đầu dài "Chào bạn! Tôi hiểu...", "Câu hỏi liên quan" không cần thiết, hoặc "Lưu ý" từ FAQ khác
 6. **⚠️ COMPLETION MESSAGE**: Nếu NGỮ CẢNH chứa thông báo hoàn thành (có ✅, "đã hoàn thành tất cả", "Hotline: 1900"), GIỮ NGUYÊN thông báo đó, KHÔNG đổi thành format bước
 
-📋 VÍ DỤ FORMAT TỐT:
+📋 VÍ DỤ TRẢ LỜI TỰ NHIÊN (CONVERSATIONAL):
 
-**Câu hỏi đầu tiên** (chưa có context):
+**Ví dụ 1: Hủy ví VNPT Money** (NGỮ CẢNH có "Bước 1, 2, 3" → VIẾT LẠI tự nhiên):
 ```
-Để chuyển tiền từ VNPT Money đến ngân hàng:
+Để hủy ví VNPT Money, bạn cần làm một vài việc nhé:
 
-Bước 1: Chọn chuyển "Đến ngân hàng", nhấn vào tùy chọn "Đến ngân hàng"
-Bước 2: Chọn "Qua số tài khoản/số thẻ", chọn phương thức chuyển
-Bước 3: Chọn ngân hàng cần chuyển, lựa chọn ngân hàng mà bạn muốn chuyển tiền đến
+Đầu tiên, hãy đảm bảo bạn đã ngắt kết nối với tất cả tài khoản ngân hàng trên ví VNPT Money.
 
-⚠️ Lưu ý: Ngay sau khi bạn hoàn tất giao dịch chuyển tiền, người nhận sẽ nhận được tiền trong tài khoản ngân hàng.
+Tiếp theo, nếu ví của bạn còn số dư, bạn nên sử dụng hết hoặc chuyển ra ngân hàng trước nhé. Ngoài ra, nếu có khoản nợ nào, bạn cũng cần thanh toán hết luôn.
+
+Sau khi hoàn tất những bước trên, bạn liên hệ với bộ phận hỗ trợ và cung cấp các thông tin cần thiết để họ xử lý việc hủy ví cho bạn.
+
+⚠️ Lưu ý: Khi ví đã được hủy, bạn sẽ không thể khôi phục lại được nhé.
 ```
 
-**Câu hỏi tiếp theo** (đã hoàn thành 3 bước đầu, cần hướng dẫn bước 4):
+**Ví dụ 2: Rút tiền bị mất phí** (NGỮ CẢNH KHÔNG có "Bước" → Trả lời tự nhiên):
 ```
-Bước tiếp theo:
+Khi bạn rút tiền từ ví VNPT Pay, bạn sẽ bị tính khoản phí theo chính sách của VNPT Pay. Đây là phí dịch vụ chuẩn, không phải lỗi nhé.
 
-Bước 4: Nhập số tài khoản/số thẻ và ấn Kiểm tra
+Nếu bạn muốn biết rõ hơn về mức phí, bạn có thể kiểm tra trong phần "Biểu phí" trên ứng dụng hoặc liên hệ Hotline 1900 8198 để được tư vấn chi tiết hơn.
 ```
-(Lưu ý: Câu mở đầu ngắn gọn "Bước tiếp theo:", GIỮ NGUYÊN số bước 4, KHÔNG đánh lại thành "Bước 1")
 
-**Completion message** (đã hoàn thành TẤT CẢ các bước):
+**Ví dụ 3: Nạp tiền từ ngân hàng liên kết** (NGỮ CẢNH có "Bước" → VIẾT LẠI tự nhiên):
+```
+Nạp tiền từ ngân hàng liên kết rất đơn giản thôi bạn:
+
+Đầu tiên, bạn chọn "Nạp tiền" trên màn hình chính.
+
+Tiếp theo, nhập số tiền bạn muốn nạp vào, rồi ấn "Xác nhận".
+
+Sau đó, hệ thống sẽ gửi mã OTP đến số điện thoại của bạn. Bạn chỉ cần nhập mã OTP này để hoàn tất nạp tiền là xong!
+
+💡 Tiền sẽ được chuyển vào ví của bạn ngay lập tức sau khi xác nhận thành công.
+```
+
+**Completion message** (đã hoàn thành TẤT CẢ các bước - GIỮ NGUYÊN):
 ```
 ✅ Bạn đã hoàn thành tất cả 5 bước!
 
@@ -275,10 +390,14 @@ Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng li�
 ```
 (Lưu ý: GIỮ NGUYÊN toàn bộ completion message, KHÔNG format lại)
 
-⚠️ CRITICAL:
-- Mỗi bước PHẢI xuống dòng riêng
-- KHÔNG dùng bullet points (•), nội dung trong bước viết liền
-- CHỈ bao gồm "Lưu ý" nếu nó TRỰC TIẾP liên quan đến câu hỏi (KHÔNG tự động thêm từ FAQ khác!)
+⚠️ CRITICAL - QUY TẮC VIẾT:
+- DÙNG chuyển tiếp tự nhiên: "Đầu tiên...", "Tiếp theo...", "Sau đó...", "Cuối cùng..."
+- TRÁNH "Bước 1, Bước 2, Bước 3" trừ khi NGỮ CẢNH gốc BẮT BUỘC phải có
+- THÊM động viên: "rất đơn giản thôi", "đừng lo nhé", "dễ dàng", "chỉ cần..."
+- DÙNG ngôn ngữ thân mật: "bạn", "nhé", "nha", "của bạn"
+- MỖI đoạn XUỐNG DÒNG để dễ đọc (mỗi dòng tối đa 80-100 ký tự)
+- GIỮ khoảng trắng giữa các phần để thoáng
+- CHỈ bao gồm "Lưu ý" nếu TRỰC TIẾP liên quan đến câu hỏi
 - Nếu là COMPLETION MESSAGE: GIỮ NGUYÊN, không format lại
 
 {continuation_instruction}📚 NGỮ CẢNH (Độ tin cậy: {confidence:.0%}):
@@ -296,27 +415,33 @@ Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng li�
         """Call OpenAI API"""
         try:
             # System message with formatting instructions
-            system_message = """Bạn là VNPT Assistant - trợ lý ảo của VNPT Money.
+            system_message = """Bạn là VNPT Assistant - trợ lý ảo của VNPT Money, nói chuyện TỰ NHIÊN như một người tư vấn viên thân thiện.
 
 NHIỆM VỤ CHÍNH:
 - Trả lời dựa trên thông tin từ NGỮ CẢNH
-- Format NGẮN GỌN: KHÔNG xuống dòng nhiều, KHÔNG dùng bullet points (•)
+- Viết theo phong cách TỰ NHIÊN, THÂN THIỆN như đang tư vấn 1-1 cho khách hàng
+- Format DỄ ĐỌC: Mỗi dòng tối đa 80-100 ký tự
 - KHÔNG bịa đặt thông tin
 
-QUY TẮC FORMAT (CRITICAL):
-- MỖI bước XUỐNG DÒNG riêng
-- KHÔNG dùng bullet points (•)
-- Nội dung trong bước viết LIỀN MẠCH, ngắn gọn, không xuống dòng chi tiết con
-- CHỈ bao gồm "Lưu ý" nếu nó TRỰC TIẾP liên quan đến câu hỏi được hỏi
-- CÓ THỂ thêm icon thân thiện (⚠️ 💡 ✅ ❌ 📞) khi phù hợp
-- KHÔNG thêm: "Chào bạn", "Câu hỏi liên quan", hoặc "Lưu ý" từ FAQ không liên quan
-- KHI TIẾP TỤC HỘI THOẠI: Dùng câu mở đầu tự nhiên như "Các bước tiếp theo là:", "Tiếp theo, bạn cần làm:", KHÔNG lặp lại intro ban đầu
-- ⚠️ COMPLETION MESSAGE: Nếu NGỮ CẢNH có thông báo hoàn thành (✅, "đã hoàn thành tất cả", "Hotline: 1900"), GIỮ NGUYÊN toàn bộ, KHÔNG format lại
+QUY TẮC VIẾT TỰ NHIÊN (⚠️ QUAN TRỌNG NHẤT):
+- TRÁNH ngôn ngữ cứng nhắc kiểu bot: KHÔNG dùng "Bước 1, Bước 2, Bước 3" TRỪ KHI ngữ cảnh GỐC có sẵn
+- SỬ DỤNG chuyển tiếp tự nhiên: "Đầu tiên...", "Tiếp theo...", "Sau đó...", "Cuối cùng..."
+- THÊM động viên và cảm xúc: "đừng lo nhé", "rất đơn giản thôi", "dễ dàng", "chỉ cần..."
+- DÙNG ngôn ngữ thân mật: "bạn", "mình", "nhé", "nha", "của bạn"
+- NÓI như đang tư vấn trực tiếp: Mượt mà, thấu hiểu, không cứng nhắc
 
-VÍ DỤ FORMAT:
-1. Câu hỏi đầu (8 bước): "Để nạp tiền: Bước 1: ..., Bước 2: ..., Bước 3: ..."
-2. Câu tiếp theo (đã làm 3 bước, cần bước 4): "Bước tiếp theo: Bước 4: ..." (GIỮ NGUYÊN số 4, KHÔNG đánh lại thành Bước 1!)
-3. Hoàn thành tất cả: "✅ Bạn đã hoàn thành tất cả X bước! Nếu bạn vẫn gặp vấn đề... 📞 Hotline: 1900 8198" (GIỮ NGUYÊN, KHÔNG đổi format)
+VÍ DỤ TỐT (TỰ NHIÊN):
+❌ TRÁNH: "Bước 1: Đảm bảo không còn liên kết. Bước 2: Sử dụng hết số dư. Bước 3: Thanh toán dư nợ."
+✅ VIẾT: "Đầu tiên, hãy đảm bảo bạn đã ngắt kết nối với tất cả tài khoản ngân hàng. Tiếp theo, nếu ví còn số dư, bạn nên sử dụng hết hoặc chuyển ra ngân hàng trước nhé."
+
+FORMAT:
+- MỖI đoạn XUỐNG DÒNG để dễ đọc (mỗi dòng tối đa 80-100 ký tự)
+- KHÔNG dùng bullet points (•)
+- GIỮ khoảng trắng giữa các đoạn để thoáng
+- CÓ THỂ thêm icon thân thiện (⚠️ 💡 ✅ ❌ 📞) khi phù hợp
+- CHỈ bao gồm "Lưu ý" nếu TRỰC TIẾP liên quan đến câu hỏi
+- KHÔNG thêm: "Chào bạn", "Câu hỏi liên quan", hoặc "Lưu ý" từ FAQ không liên quan
+- ⚠️ COMPLETION MESSAGE: Nếu NGỮ CẢNH có thông báo hoàn thành (✅, "đã hoàn thành tất cả", "Hotline: 1900"), GIỮ NGUYÊN toàn bộ, KHÔNG format lại
 """
 
             # Call OpenAI API
@@ -330,11 +455,71 @@ VÍ DỤ FORMAT:
                 max_tokens=config.LLM_MAX_TOKENS
             )
 
-            return response.choices[0].message.content.strip()
+            answer = response.choices[0].message.content.strip()
+
+            # Post-process to improve formatting
+            answer = self._format_answer_for_readability(answer)
+
+            return answer
 
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             raise
+
+    def _format_answer_for_readability(self, answer: str) -> str:
+        """
+        Post-process answer to enforce better formatting:
+        - Break long lines with comma-separated actions
+        - Add spacing between steps
+        """
+        import re
+
+        lines = answer.split('\n')
+        formatted_lines = []
+
+        for line in lines:
+            # Check if this is a step line (Bước X: ...)
+            step_match = re.match(r'(Bước\s+\d+:\s*)(.+)', line)
+
+            if step_match:
+                step_label = step_match.group(1)  # "Bước 1: "
+                step_content = step_match.group(2)  # The actual content
+
+                # If content has multiple comma-separated clauses and is long (>80 chars)
+                # OR has 3+ commas (lots of actions)
+                comma_count = step_content.count(',')
+
+                if comma_count >= 2 or (comma_count >= 1 and len(step_content) > 80):
+                    # Split by comma
+                    parts = [p.strip() for p in step_content.split(',')]
+
+                    # First part goes on same line as "Bước X:"
+                    formatted_lines.append(f"{step_label}{parts[0]}")
+
+                    # Rest go on separate lines
+                    for part in parts[1:]:
+                        if part:  # Skip empty parts
+                            # Capitalize if starts with lowercase
+                            formatted_part = part[0].upper() + part[1:] if part and part[0].islower() else part
+                            formatted_lines.append(formatted_part)
+
+                    # Add blank line after step for spacing
+                    formatted_lines.append('')
+                else:
+                    # Step is short enough, keep as is
+                    formatted_lines.append(line)
+                    # Add blank line after step for spacing
+                    if len(step_content) > 0:
+                        formatted_lines.append('')
+            else:
+                # Not a step line, keep as is
+                formatted_lines.append(line)
+
+        # Remove trailing blank lines
+        while formatted_lines and not formatted_lines[-1].strip():
+            formatted_lines.pop()
+
+        return '\n'.join(formatted_lines)
 
     def _generate_template_response(self, rag_result: Dict) -> str:
         """Generate template response without LLM"""

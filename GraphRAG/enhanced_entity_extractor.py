@@ -177,6 +177,13 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
 
         # THÊM: Regex patterns cho Feature detection (NEW! - PRIORITY 1)
         self.feature_patterns_regex = [
+            # Payment method features (CRITICAL - Must extract specific methods!)
+            (r"(ngân\s+hàng\s+)?liên\s+kết(\s+ngân\s+hàng)?", "liên kết ngân hàng"),
+            (r"(nạp|chuyển)\s+(tiền\s+)?(bằng\s+|qua\s+|từ\s+)?qr", "QR code"),
+            (r"chuyển\s+khoản\s+qr", "QR code"),
+            (r"quét\s+mã", "QR code"),
+
+            # Generic features
             (r"\bqr\b", "QR"),
             (r"mã\s+qr", "QR"),
             (r"\bnfc\b", "NFC"),
@@ -269,6 +276,16 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"chat\s+(hỗ\s+trợ|support)", "chat support"),
             (r"email\s+(hỗ\s+trợ|support)", "email support"),
             (r"trung\s+tâm\s+hỗ\s+trợ", "trung tâm hỗ trợ"),
+            # CRITICAL FIX: Add patterns for "chăm sóc khách hàng"
+            (r"chăm\s+sóc\s+khách\s+hàng", "Bộ phận chăm sóc khách hàng"),
+            (r"tổng\s+đài", "Hotline"),
+            (r"số\s+điện\s+thoại", "Hotline"),
+            # CRITICAL FIX: Add specific carrier patterns (for queries about carrier contact info)
+            (r"vinaphone", "Vinaphone: 18001091"),
+            (r"mobifone", "Mobifone: 18001090"),
+            (r"viettel", "Viettel: 18008098"),
+            (r"vietnamobile", "Vietnamobile: 0922789789"),
+            (r"gmobile", "Gmobile: 0598880199"),
         ]
 
         # THÊM: Expanded Service patterns (IMPROVE EXISTING - specific patterns)
@@ -890,8 +907,9 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             merged[entity_type] = llm_vals.copy()
 
             # Priority 2: Add regex values selectively
-            # High-value factual entity types - trust regex
-            if entity_type in ['Bank', 'Document', 'Error', 'Status', 'Fee', 'Limit']:
+            # High-value factual entity types - trust regex (CRITICAL for filtering!)
+            # Feature is CRITICAL for filtering specific methods (e.g., "liên kết ngân hàng" vs "QR code")
+            if entity_type in ['Bank', 'Document', 'Error', 'Status', 'Fee', 'Limit', 'Feature']:
                 for rv in regex_vals:
                     if rv not in merged[entity_type]:
                         merged[entity_type].append(rv)
@@ -965,8 +983,17 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
                 # Moderate validation for others
                 else:
                     # Check if at least one word appears
-                    value_words = value.lower().split()
-                    if any(word in query_lower for word in value_words):
+                    # CRITICAL FIX: Clean punctuation from words before matching
+                    import string
+                    value_words = [w.strip(string.punctuation) for w in value.lower().split()]
+                    # Also check if query words appear in entity value (for cases like "vinaphone" in "Vinaphone: 18001091")
+                    query_words = [w.strip(string.punctuation) for w in query_lower.split()]
+
+                    # Match if any word from value appears in query OR any word from query appears in value
+                    word_match = any(word in query_lower for word in value_words if word) or \
+                                 any(word in value.lower() for word in query_words if word)
+
+                    if word_match:
                         validated[entity_type].append(value)
                     else:
                         logger.warning(f"   ⚠️ Filtered LLM entity (no words match): {entity_type}={value}")

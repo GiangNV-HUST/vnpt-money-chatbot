@@ -63,6 +63,10 @@ HYBRID_WEIGHT_ENTITY_GRAPH = 0.7  # Entity-based graph search (70% - increased t
 HYBRID_WEIGHT_SEMANTIC = 0.3      # Semantic similarity search (30% - reduced to minimize contamination from previous queries)
 HYBRID_WEIGHT_KEYWORD = 0.0       # Keyword search (disabled in hybrid mode)
 
+# Hybrid Entity Matching (NEW!)
+USE_HYBRID_ENTITY_MATCHING = True  # Use hybrid (rule-based + semantic) for entity matching in graph scoring
+HYBRID_ENTITY_USE_SEMANTIC = True  # Enable semantic matching in hybrid entity matcher (requires embedding model)
+
 # Vector Store Configuration (for hybrid mode)
 VECTOR_STORE_TYPE = "chromadb"  # Options: "chromadb", "faiss"
 CHROMA_PERSIST_DIR = DATA_DIR / "chroma_db"

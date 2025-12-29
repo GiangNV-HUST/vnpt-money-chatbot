@@ -243,7 +243,12 @@ Tóm tắt (bằng tiếng Việt, 2-3 câu):"""
         # Only update when it's a continuation - otherwise user hasn't completed any steps yet
 
         # Update last FAQ and answer
-        self.current_context["last_faq_id"] = bot_response.get("all_results", [{}])[0].get("question_id") if bot_response.get("all_results") else None
+        # CRITICAL FIX: Use 'faq_id' (not 'question_id') to match Neo4j schema
+        if bot_response.get("all_results"):
+            top_result = bot_response["all_results"][0]
+            self.current_context["last_faq_id"] = top_result.get("faq_id") or top_result.get("question_id")
+        else:
+            self.current_context["last_faq_id"] = None
         self.current_context["last_answer"] = answer
 
     def _is_final_completion_step(self, step_text: str) -> bool:
@@ -840,6 +845,52 @@ Tóm tắt (bằng tiếng Việt, 2-3 câu):"""
         Returns:
             (enhanced_query, context_info)
         """
+        # CRITICAL FIX: Detect topic change BEFORE checking continuation
+        # If user asks about completely new topic, reset step context
+        current_topic = self._extract_topic_from_text(user_query)
+        previous_topic = self.current_context.get("topic")
+
+        # Check if topic has changed significantly
+        topic_changed = False
+        if current_topic and previous_topic:
+            # Different topics = reset context
+            if current_topic != previous_topic:
+                # But allow some related topics (e.g., "nạp tiền" and "nạp tiền điện thoại")
+                if not (current_topic in previous_topic or previous_topic in current_topic):
+                    topic_changed = True
+                    logger.info(f"🔄 Topic changed: '{previous_topic}' → '{current_topic}' - Resetting step context")
+                    # Reset step tracking but keep topic
+                    self.current_context["current_step"] = None
+                    self.current_context["completed_steps"] = []
+                    self.current_context["all_steps"] = []
+
+        # CRITICAL: Also detect "new question" patterns that indicate topic reset
+        # Even if topic is similar, certain patterns mean "start over"
+        new_question_indicators = [
+            r'(làm\s+sao|làm\s+thế\s+nào|như\s+thế\s+nào|cách\s+nào)\s+để',  # "làm sao để X" = new question
+            r'hướng\s+dẫn\s+(tôi|mình|em)',  # "hướng dẫn tôi" = new question
+            r'tôi\s+muốn\s+(biết|hỏi)',  # "tôi muốn biết" = new question
+            r'^(nhưng|nhưng\s+mà)\s+',  # Starts with "nhưng" = problem/new issue
+        ]
+
+        is_new_question = any(re.search(pattern, user_query.lower()) for pattern in new_question_indicators)
+
+        # SPECIAL CASE: Troubleshooting after success
+        # "thành công nhưng..." or "đã làm xong nhưng..." = NEW issue, not continuation
+        is_troubleshooting = bool(re.search(r'(thành\s+công|xong|hoàn\s+thành)\s+(nhưng|nhưng\s+mà|mà)', user_query.lower()))
+
+        if is_troubleshooting:
+            logger.info(f"🔧 Troubleshooting query detected - Resetting step context")
+            self.current_context["current_step"] = None
+            self.current_context["completed_steps"] = []
+            self.current_context["all_steps"] = []
+            topic_changed = True
+
+        # If topic changed or is new question, don't use continuation context
+        if topic_changed or is_new_question:
+            logger.info(f"🆕 New question detected (topic_changed={topic_changed}, is_new_question={is_new_question}) - Treating as fresh query")
+            return user_query, None
+
         # Check if this is a contextual query
         continuation_context = self.get_continuation_context(user_query)
 
