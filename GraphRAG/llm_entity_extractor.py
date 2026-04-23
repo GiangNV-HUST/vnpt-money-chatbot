@@ -25,14 +25,17 @@ class LLMEntityExtractor:
         """
         self.provider = provider or config.LLM_PROVIDER
 
-        if self.provider == "openai":
+        if self.provider == "vllm":
+            self._init_vllm()
+        elif self.provider == "openai":
             self._init_openai(api_key)
         elif self.provider == "gemini":
             self._init_gemini(api_key)
         else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai' or 'gemini'")
+            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm' or 'gemini'")
 
-        logger.info(f"Initialized LLM Entity Extractor with {self.provider} ({config.LLM_MODEL})")
+        model_name = config.VLLM_MODEL if self.provider == "vllm" else config.LLM_MODEL
+        logger.info(f"Initialized LLM Entity Extractor with {self.provider} ({model_name})")
 
     def _init_openai(self, api_key: Optional[str] = None):
         """Initialize OpenAI client"""
@@ -74,6 +77,27 @@ class LLMEntityExtractor:
         )
         self.model_name = config.LLM_MODEL
 
+    def _init_vllm(self):
+        """Initialize vLLM client (OpenAI-compatible API)"""
+        try:
+            from openai import OpenAI, DefaultHttpxClient
+        except ImportError:
+            raise ImportError("OpenAI package not installed. Run: pip install openai")
+
+        # Create httpx client without proxy for vLLM server
+        http_client = DefaultHttpxClient(
+            trust_env=False,
+            timeout=config.VLLM_TIMEOUT,
+        )
+
+        self.client = OpenAI(
+            api_key=config.VLLM_API_KEY,
+            base_url=config.VLLM_API_BASE,
+            http_client=http_client,
+        )
+        self.model_name = config.VLLM_MODEL
+        logger.info(f"vLLM client initialized: {self.model_name} at {config.VLLM_API_BASE}")
+
     def extract_entities_and_relationships(
         self,
         question: str,
@@ -96,7 +120,9 @@ class LLMEntityExtractor:
         prompt = self._build_extraction_prompt(question, answer, section)
 
         try:
-            if self.provider == "openai":
+            if self.provider == "vllm":
+                response_text = self._call_vllm(prompt)
+            elif self.provider == "openai":
                 response_text = self._call_openai(prompt)
             else:  # gemini
                 response_text = self._call_gemini(prompt)
@@ -109,6 +135,19 @@ class LLMEntityExtractor:
 
     def _call_openai(self, prompt: str) -> str:
         """Call OpenAI API"""
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are an expert in analyzing Vietnamese text and extracting structured information."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=2048
+        )
+        return response.choices[0].message.content
+
+    def _call_vllm(self, prompt: str) -> str:
+        """Call vLLM server (OpenAI-compatible API)"""
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
@@ -186,8 +225,9 @@ class LLMEntityExtractor:
    - Ví dụ: "2 ngày làm việc", "3 ngày làm việc", "45-60 ngày làm việc", "Ngay lập tức"
    - **LƯU Ý**: Chuẩn hóa bằng cách loại bỏ ghi chú trong ngoặc như "(không tính thứ 7, CN và Lễ)"
 
-9. **Status**: Trạng thái của giao dịch hoặc tài khoản
+9. **Status**: Trạng thái của giao dịch hoặc tài khoản, HOẶC điều kiện về việc nhận/chuyển tiền
    - Ví dụ: "Thành công", "Đang xử lý", "Thất bại", "Chưa kích hoạt", "Đã kích hoạt"
+   - **QUAN TRỌNG**: Bao gồm cả trạng thái điều kiện: "đã nhận tiền", "chưa nhận tiền", "đã nhận được tiền", "chưa nhận được tiền"
 
 10. **Document**: Loại giấy tờ định danh
     - Ví dụ: "CCCD", "CMND", "Hộ chiếu", "CCCD gắn chíp", "Giấy tờ"
@@ -297,15 +337,30 @@ Câu trả lời: {answer}
 
 3. **Xử lý Trạng thái:**
    - Khi câu trả lời đề cập "Trạng thái", "trạng thái", status
+   - **QUAN TRỌNG**: Cũng trích xuất điều kiện về việc nhận/chuyển tiền như "đã nhận tiền", "chưa nhận tiền"
    - Trích xuất Status entity
    - Tạo relationship HAS_STATUS
 
-   Ví dụ:
+   Ví dụ 1 - Trạng thái giao dịch:
    Input: "Giao dịch có trạng thái 'Đang xử lý'"
    Output:
    - Action: ["Giao dịch"]
    - Status: ["Đang xử lý"]
    - Relationship: (Giao dịch) -[HAS_STATUS]-> (Đang xử lý)
+
+   Ví dụ 2 - Điều kiện nhận tiền (MỚI):
+   Input: "VNPT Money đã nhận được tiền rồi"
+   Output:
+   - Service: ["VNPT Money"]
+   - Status: ["đã nhận tiền"]
+   - Relationship: (VNPT Money) -[HAS_STATUS]-> (đã nhận tiền)
+
+   Ví dụ 3 - Điều kiện chưa nhận tiền (MỚI):
+   Input: "VNPT Money chưa nhận được tiền"
+   Output:
+   - Service: ["VNPT Money"]
+   - Status: ["chưa nhận tiền"]
+   - Relationship: (VNPT Money) -[HAS_STATUS]-> (chưa nhận tiền)
 
 4. **Xử lý Giấy tờ:**
    - Khi câu trả lời yêu cầu CCCD, CMND, Hộ chiếu, etc.
