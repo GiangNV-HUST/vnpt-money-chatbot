@@ -141,7 +141,7 @@ def display_message(role, content, metadata=None):
             confidence = metadata.get("confidence", 0)
             confidence_badge = format_confidence(confidence)
 
-            # Entities
+            # Entities (ENRICHED with descriptions, solutions, links)
             entities = metadata.get("related_entities", {})
             entity_tags = []
 
@@ -154,6 +154,26 @@ def display_message(role, content, metadata=None):
             if entities.get("banks"):
                 for b in entities["banks"][:2]:
                     entity_tags.append(f'<span class="entity-tag">🏦 {b}</span>')
+
+            # NEW: Contact channels with phone
+            if entities.get("contact_channels"):
+                for c in entities["contact_channels"][:2]:
+                    if isinstance(c, dict):
+                        phone = c.get('phone', '')
+                        name = c.get('name', '')
+                        if phone:
+                            entity_tags.append(f'<span class="entity-tag">📞 {name}: {phone}</span>')
+                    else:
+                        entity_tags.append(f'<span class="entity-tag">📞 {c}</span>')
+
+            # NEW: Useful links
+            if entities.get("useful_links"):
+                for link in entities["useful_links"][:2]:
+                    if isinstance(link, dict):
+                        url = link.get('url', '')
+                        name = link.get('name', 'Link')
+                        if url:
+                            entity_tags.append(f'<span class="entity-tag">🔗 <a href="{url}" target="_blank">{name}</a></span>')
 
             if entity_tags:
                 entities_html = "<br><br>" + "".join(entity_tags)

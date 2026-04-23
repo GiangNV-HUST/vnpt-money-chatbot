@@ -7,13 +7,13 @@ Cải tiến từ SimpleEntityExtractor
 import re
 import logging
 from typing import Dict, List, Tuple
-from simple_entity_extractor import SimpleEntityExtractor
+# from simple_entity_extractor import SimpleEntityExtractor  # NOT NEEDED - using LLM extractor
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 
-class EnhancedEntityExtractor(SimpleEntityExtractor):
+class EnhancedEntityExtractor:
     """
     Enhanced version với:
     1. Regex patterns cho flexibility
@@ -22,7 +22,9 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
     """
 
     def __init__(self):
-        super().__init__()
+        # Import LLM extractor for entity extraction
+        from llm_entity_extractor import LLMEntityExtractor
+        self.llm_extractor = LLMEntityExtractor()
 
         # THÊM: Regex patterns cho error detection
         # IMPORTANT: Error names MUST match Neo4j Error node names exactly!
@@ -144,6 +146,11 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
             (r"chờ\s+xác\s+nhận", "Chờ xác nhận"),
             (r"thất\s+bại", "Thất bại"),
             (r"thành\s+công", "Thành công"),
+            # Conditional status patterns (PRIORITY 1 FIX)
+            (r"đã\s+nhận\s+(được\s+)?tiền", "đã nhận tiền"),
+            (r"chưa\s+nhận\s+(được\s+)?tiền", "chưa nhận tiền"),
+            (r"đã\s+(nhận|chuyển|gửi)", "đã nhận tiền"),  # Generic "đã ..."
+            (r"chưa\s+(nhận|chuyển|gửi)", "chưa nhận tiền"),  # Generic "chưa ..."
         ]
 
         # THÊM: Regex patterns cho Fee detection (NEW! - IMPORTANT)
@@ -373,14 +380,11 @@ class EnhancedEntityExtractor(SimpleEntityExtractor):
         """
         import config
 
-        # Step 1: Pattern-based extraction (from parent)
-        entities = self.extract(query)
+        # Step 1: Pattern-based extraction (using regex directly - no parent class needed)
+        entities = self._extract_with_regex(query)
 
-        # Step 2: Enhanced regex extraction
-        regex_entities = self._extract_with_regex(query)
-
-        # Step 3: Merge results
-        entities = self._merge_entities(entities, regex_entities)
+        # Step 2: Merge results (no need to merge since we only have regex entities)
+        # entities = self._merge_entities(entities, regex_entities)  # SKIP - already have regex entities
 
         # Step 4: Apply contextual rules
         entities = self._apply_contextual_rules(query, entities)

@@ -1,9 +1,15 @@
 """
 Neo4j GraphRAG Query Engine for VNPT Money Chatbot
 Implements graph traversal and retrieval using Neo4j Cypher queries
+
+ENHANCED VERSION:
+- Intent-based answer extraction (FEE, LIMIT, TIME, HOW_TO, TROUBLESHOOT)
+- Feature filtering in Cypher queries
+- LLM-based answer extraction instead of returning full FAQ
 """
 
 import logging
+import re
 from typing import List, Dict, Optional
 import numpy as np
 
@@ -13,9 +19,83 @@ import config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# =====================================================
+# Vietnamese No-Diacritics to Diacritics Mapping
+# For handling queries without Vietnamese accents
+# =====================================================
+VIETNAMESE_NO_DIACRITICS_MAP = {
+    # Common words in VNPT Money domain
+    'nap': 'nạp', 'tien': 'tiền', 'vi': 'ví', 'vao': 'vào',
+    'rut': 'rút', 've': 'về', 'chuyen': 'chuyển', 'den': 'đến',
+    'phi': 'phí', 'bao': 'bao', 'nhieu': 'nhiêu', 'lau': 'lâu',
+    'ngan': 'ngân', 'hang': 'hàng', 'lien': 'liên', 'ket': 'kết',
+    'tai': 'tài', 'khoan': 'khoản', 'mat': 'mật', 'khau': 'khẩu',
+    'dang': 'đăng', 'ky': 'ký', 'doi': 'đổi', 'quen': 'quên',
+    'han': 'hạn', 'muc': 'mức', 'thoi': 'thời', 'gian': 'gian',
+    'giao': 'giao', 'dich': 'dịch', 'that': 'thất', 'bai': 'bại',
+    'loi': 'lỗi', 'thanh': 'thanh', 'toan': 'toán', 'hoa': 'hóa',
+    'don': 'đơn', 'dien': 'điện', 'nuoc': 'nước', 'internet': 'internet',
+    'dinh': 'định', 'danh': 'danh', 'xac': 'xác', 'thuc': 'thực',
+    'cccd': 'cccd', 'cmnd': 'cmnd', 'otp': 'otp',
+    'huong': 'hướng', 'dan': 'dẫn', 'cach': 'cách', 'lam': 'làm',
+    'sao': 'sao', 'the': 'thế', 'nao': 'nào', 'gi': 'gì',
+    've': 'vé', 'may': 'máy', 'bay': 'bay', 'tau': 'tàu',
+    'mua': 'mua', 'dat': 'đặt', 'dang': 'đăng',
+    'so': 'số', 'du': 'dư', 'toi': 'tối', 'da': 'đa', 'thieu': 'thiểu',
+    'hotline': 'hotline', 'tong': 'tổng', 'dai': 'đài',
+    'khoa': 'khóa', 'mo': 'mở', 'huy': 'hủy',
+    'voucher': 'voucher', 'ma': 'mã', 'giam': 'giảm', 'gia': 'giá',
+    'khuyen': 'khuyến', 'mai': 'mãi', 'tich': 'tích', 'diem': 'điểm',
+    'bao': 'bảo', 'mat': 'mật', 'an': 'an', 'toan': 'toàn',
+    'van': 'vân', 'tay': 'tay', 'khuon': 'khuôn', 'mat': 'mặt',
+    'sinh': 'sinh', 'trac': 'trắc', 'hoc': 'học',
+    'tra': 'tra', 'cuu': 'cứu', 'lich': 'lịch', 'su': 'sử',
+    'vnpt': 'vnpt', 'money': 'money', 'app': 'app', 'ung': 'ứng', 'dung': 'dụng',
+    'tru': 'trừ', 'cong': 'cộng', 'hoan': 'hoàn',
+    'dieu': 'điều', 'kien': 'kiện', 'yeu': 'yêu', 'cau': 'cầu',
+    'thu': 'thụ', 'huong': 'hưởng', 'nguoi': 'người', 'nhan': 'nhận',
+    'gui': 'gửi', 'nham': 'nhầm', 'hoi': 'hỏi', 'dap': 'đáp',
+    'tro': 'trợ', 'giup': 'giúp', 'ho': 'hỗ',
+}
+
+def convert_no_diacritics_to_vietnamese(text: str) -> str:
+    """
+    Convert Vietnamese text without diacritics to text with diacritics.
+    Uses word-by-word mapping for common VNPT Money domain terms.
+
+    Example: "cach nap tien vao vi" -> "cách nạp tiền vào ví"
+    """
+    if not text:
+        return text
+
+    # Check if text likely has no diacritics (no Vietnamese characters)
+    vietnamese_chars = 'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ'
+    has_vietnamese = any(c in text.lower() for c in vietnamese_chars)
+
+    if has_vietnamese:
+        # Already has Vietnamese diacritics, return as is
+        return text
+
+    # Convert word by word
+    words = text.lower().split()
+    converted_words = []
+
+    for word in words:
+        # Clean word (remove punctuation at end)
+        clean_word = re.sub(r'[?.!,;:]$', '', word)
+        suffix = word[len(clean_word):]  # Keep punctuation
+
+        # Look up in mapping
+        if clean_word in VIETNAMESE_NO_DIACRITICS_MAP:
+            converted_words.append(VIETNAMESE_NO_DIACRITICS_MAP[clean_word] + suffix)
+        else:
+            converted_words.append(word)
+
+    return ' '.join(converted_words)
+
 
 class Neo4jGraphRAGEngine:
-    """GraphRAG Engine using Neo4j backend"""
+    """GraphRAG Engine using Neo4j backend - ENHANCED VERSION"""
 
     def __init__(self):
         """Initialize GraphRAG Engine with Neo4j"""
@@ -28,22 +108,28 @@ class Neo4jGraphRAGEngine:
         self.entity_extractor = EnhancedEntityExtractor()
         logger.info("Enhanced entity extractor initialized (regex + confidence scoring)")
 
-        # Initialize intent classifier (NEW)
+        # Initialize intent classifier (ENHANCED)
         from intent_classifier import IntentClassifier
         self.intent_classifier = IntentClassifier()
-        logger.info("Intent classifier initialized")
+        logger.info("Enhanced intent classifier initialized (FEE, LIMIT, TIME, HOW_TO, TROUBLESHOOT)")
 
-        # Initialize step extractor (NEW)
+        # Initialize intent-based answer extractor (NEW!)
+        from intent_answer_extractor import IntentAnswerExtractor
+        self.answer_extractor = IntentAnswerExtractor()
+        logger.info("Intent answer extractor initialized (LLM-based)")
+
+        # Initialize focused answer extractor (NEWEST - 3-layer extraction)
+        from focused_answer_extractor import FocusedAnswerExtractor
+        self.focused_extractor = FocusedAnswerExtractor(neo4j_connector=self.connector)
+        logger.info("Focused answer extractor initialized (Entity → Case → LLM)")
+
+        # Initialize step extractor
         from step_tracker import StepExtractor
         self.step_extractor = StepExtractor(neo4j_connector=self.connector)
         logger.info("Step extractor initialized")
 
-        # Initialize hybrid entity matcher (NEW!)
+        # Hybrid entity matcher disabled (PyTorch dependency removed)
         self.hybrid_matcher = None
-        if config.USE_HYBRID_ENTITY_MATCHING:
-            from hybrid_entity_matcher import HybridEntityMatcher
-            self.hybrid_matcher = HybridEntityMatcher(use_semantic=config.HYBRID_ENTITY_USE_SEMANTIC)
-            logger.info("✅ Hybrid entity matcher initialized (rule-based + semantic)")
 
         # Query cache
         self.cache = {}
@@ -57,7 +143,8 @@ class Neo4jGraphRAGEngine:
         except Exception as e:
             logger.warning(f"Failed to load embeddings model: {e}")
 
-    def query(self, user_query: str, top_k: int = 5, continuation_context: Optional[Dict] = None) -> Dict:
+    def query(self, user_query: str, top_k: int = 5, continuation_context: Optional[Dict] = None,
+              follow_up_context: Optional[Dict] = None) -> Dict:
         """
         Main query method - ENTITY-FIRST APPROACH with CONTEXT SUPPORT
 
@@ -65,16 +152,36 @@ class Neo4jGraphRAGEngine:
             user_query: User's question
             top_k: Number of results to return
             continuation_context: Optional conversation context for step continuation
+            follow_up_context: Optional follow-up context from Mem0 (NEW!)
+                - is_follow_up: bool
+                - topic: str (previous topic)
+                - faq_id: str (previous FAQ ID to search within)
+                - context_needed: str (what user is asking about)
+                - memories: list (relevant memories)
 
         Returns:
             Query result with answers, context, and metadata
         """
-        # Check cache (skip if continuation context provided)
-        if not continuation_context and config.CACHE_ENABLED and user_query in self.cache:
+        # Check cache (skip if context provided)
+        has_context = continuation_context or follow_up_context
+        if not has_context and config.CACHE_ENABLED and user_query in self.cache:
             logger.info("Returning cached result")
             return self.cache[user_query]
 
+        # IMPORTANT: Convert no-diacritics Vietnamese to diacritics
+        # This allows queries like "cach nap tien vao vi" to work
+        original_query = user_query
+        user_query = convert_no_diacritics_to_vietnamese(user_query)
+        if user_query != original_query:
+            logger.info(f"Converted no-diacritics query: '{original_query}' → '{user_query}'")
+
         logger.info(f"Processing query: {user_query}")
+
+        # NEW: Log follow-up context if provided
+        if follow_up_context and follow_up_context.get("is_follow_up"):
+            logger.info(f"🔗 FOLLOW-UP DETECTED: topic='{follow_up_context.get('topic')}', "
+                       f"faq_id='{follow_up_context.get('faq_id')}', "
+                       f"context='{follow_up_context.get('context_needed')}'")
 
         # Step 0: Classify intent (NEW)
         intent, intent_confidence, intent_details = self.intent_classifier.classify(user_query)
@@ -102,8 +209,22 @@ class Neo4jGraphRAGEngine:
             logger.info("🔗 Processing step continuation query")
             return self._handle_step_continuation(user_query, continuation_context, query_entities)
 
+        # Step 1.7: Handle follow-up queries with Mem0 context (NEW!)
+        if follow_up_context and follow_up_context.get("is_follow_up"):
+            logger.info("🔗 Processing follow-up query with Mem0 context")
+            return self._handle_follow_up_query(
+                user_query=user_query,
+                follow_up_context=follow_up_context,
+                query_entities=query_entities,
+                intent=intent,
+                intent_confidence=intent_confidence,
+                top_k=top_k
+            )
+
         # Step 2: Find relevant nodes (GRAPH-ONLY search) with REGEX FALLBACK
-        relevant_nodes = self._find_relevant_nodes(user_query, query_entities, top_k, intent)
+        # IMPORTANT: Retrieve MORE candidates (top_k * 3) to ensure procedural FAQs aren't filtered out early
+        intermediate_top_k = top_k * 3 if intent == "HOW_TO" else top_k * 2
+        relevant_nodes = self._find_relevant_nodes(user_query, query_entities, intermediate_top_k, intent)
 
         # Step 2.5: REGEX FALLBACK - If no nodes found with LLM entities, try adding regex entities
         if getattr(config, 'USE_REGEX_FALLBACK_ON_EMPTY_RESULTS', False):
@@ -120,8 +241,34 @@ class Neo4jGraphRAGEngine:
                 else:
                     logger.warning("❌ Regex fallback also returned no results")
 
+        # Step 2.6: INTENT-BASED KEYWORD SEARCH - For specific intents (FEE, LIMIT, TIME),
+        # add keyword search results to improve retrieval when entity graph is not sufficient
+        specific_intents = ["FEE", "LIMIT", "TIME"]
+        if intent in specific_intents:
+            keyword_results = self._intent_keyword_search(user_query, intent, top_k)
+            if keyword_results:
+                logger.info(f"✅ Intent keyword search found {len(keyword_results)} additional results")
+                # Merge with existing results, avoiding duplicates
+                existing_ids = {n["node_id"] for n in relevant_nodes}
+                for kr in keyword_results:
+                    if kr["node_id"] not in existing_ids:
+                        relevant_nodes.append(kr)
+                        existing_ids.add(kr["node_id"])
+
+        # Step 2.7: ALWAYS CHECK FOR EXACT MATCH - Critical for FAQs without entity links
+        # This ensures exact question matches are not missed even if entity search succeeds
+        exact_match_results = self._find_exact_match_faq(user_query)
+        if exact_match_results:
+            existing_ids = {n["node_id"] for n in relevant_nodes}
+            for emr in exact_match_results:
+                if emr["node_id"] not in existing_ids:
+                    # Add with HIGH score to ensure it's prioritized
+                    emr["score"] = 1.0  # Max score for exact match
+                    relevant_nodes.insert(0, emr)  # Insert at beginning
+                    logger.info(f"🎯 EXACT MATCH INJECTION: {emr['node_id']} added to results")
+
         # Step 3: Traverse graph to get context (with early exact match boosting)
-        context = self._get_graph_context(relevant_nodes, query_entities, user_query)
+        context = self._get_graph_context(relevant_nodes, query_entities, user_query, intent)
 
         # Step 4: Rank and select best results (with intent-aware ranking)
         results = self._rank_results(context, user_query, intent, query_entities)
@@ -262,6 +409,17 @@ class Neo4jGraphRAGEngine:
         error_entity_fallback = has_error_entities and not entity_results
 
         if entity_results:
+            # CRITICAL: Verify entity results are actually relevant to query
+            # This prevents wrong FAQs from being returned when entity graph matches
+            # something unrelated (e.g., "liên kết ngân hàng" matching FAQ about "chuyển tiền nhầm")
+            entity_results = self._verify_entity_results_relevance(query, entity_results, top_k)
+
+            if not entity_results:
+                # Entity results were filtered out - fallback to keyword search
+                logger.warning("⚠️ Entity results filtered as irrelevant, falling back to keyword search")
+                keyword_results = self._keyword_search(query, top_k)
+                return keyword_results
+
             # Check if hybrid mode is enabled
             if config.ENABLE_HYBRID_MODE and self.embeddings_model:
                 logger.info(f"HYBRID MODE: Found {len(entity_results)} results via graph traversal")
@@ -304,11 +462,146 @@ class Neo4jGraphRAGEngine:
             logger.warning(f"Error entity detected but not found in graph → Using PURE SEMANTIC search")
             return self._semantic_search(query, top_k)
 
-        # Fallback: If NO entities extracted -> use keyword search
-        logger.warning("No entities found in query - using keyword fallback")
+        # Fallback: If NO entities extracted -> check if out of scope first
+        logger.warning("No entities found in query - checking if out of scope")
+
+        # Check if query contains any VNPT Money related keywords
+        vnpt_keywords = [
+            'vnpt', 'ví', 'tiền', 'chuyển', 'nạp', 'rút', 'thanh toán', 'liên kết',
+            'ngân hàng', 'giao dịch', 'tài khoản', 'định danh', 'mật khẩu', 'otp',
+            'mobile money', 'phí', 'hạn mức', 'lỗi', 'thất bại', 'hotline', 'hỗ trợ',
+            'đăng ký', 'hủy', 'khóa', 'mở khóa', 'ứng dụng', 'app', 'pay', 'money',
+            'điện thoại', 'số dư', 'biểu phí', 'khuyến mãi', 'voucher', 'mã giảm giá'
+        ]
+
+        query_lower = query.lower()
+        has_vnpt_keyword = any(kw in query_lower for kw in vnpt_keywords)
+
+        if not has_vnpt_keyword:
+            # Query is likely out of scope
+            logger.warning(f"Query appears to be out of scope: {query}")
+            return []  # Return empty to trigger no_results handling
+
+        # Use keyword search if query has VNPT-related keywords
         keyword_results = self._keyword_search(query, top_k)
 
         return keyword_results
+
+    def _verify_entity_results_relevance(
+        self,
+        query: str,
+        entity_results: List[Dict],
+        top_k: int
+    ) -> List[Dict]:
+        """
+        Verify that entity graph results are actually relevant to the query.
+
+        This prevents the common issue where entity graph returns wrong FAQs because
+        entities match something unrelated. For example:
+        - Query: "Cách liên kết ngân hàng?"
+        - Wrong match: FAQ about "chuyển tiền nhầm" (because both contain "ngân hàng")
+
+        Strategy:
+        1. Get FAQ questions for top entity results
+        2. Calculate keyword overlap between query and FAQ question
+        3. Filter out FAQs with very low relevance
+
+        Args:
+            query: Original user query
+            entity_results: Results from entity graph search
+            top_k: Number of results to verify
+
+        Returns:
+            Filtered list of relevant entity results
+        """
+        if not entity_results:
+            return []
+
+        query_lower = query.lower()
+
+        # Extract key terms from query (excluding stopwords)
+        stopwords = {'tôi', 'bạn', 'là', 'có', 'thể', 'được', 'để', 'và', 'hoặc', 'hay',
+                    'này', 'đó', 'như', 'thế', 'nào', 'gì', 'sao', 'làm', 'muốn', 'cần',
+                    'của', 'cho', 'với', 'từ', 'đến', 'trong', 'bao', 'nhiêu', 'ở', 'đâu',
+                    'mà', 'khi', 'nếu', 'thì', 'vì', 'do', 'bởi', 'nhưng', 'còn', 'vẫn'}
+
+        query_terms = set(w for w in query_lower.split() if w not in stopwords and len(w) > 1)
+
+        # Important compound terms to check - MORE SPECIFIC patterns
+        # Only use MULTI-WORD patterns to avoid false positives
+        important_terms = []
+        compound_patterns = [
+            'liên kết ngân hàng', 'liên kết tài khoản', 'liên kết bank',
+            'nạp tiền vào ví', 'nạp tiền từ',
+            'rút tiền về', 'rút tiền từ ví',
+            'chuyển tiền đến', 'chuyển tiền cho', 'chuyển tiền qua',
+            'đăng ký tài khoản', 'đăng ký ví', 'tạo tài khoản',
+            'đổi mật khẩu', 'thay đổi mật khẩu', 'quên mật khẩu', 'lấy lại mật khẩu',
+            'vé máy bay', 'mua vé', 'đặt vé',
+            'thanh toán hóa đơn', 'thanh toán tiền điện', 'thanh toán tiền nước',
+            'định danh tài khoản', 'xác thực định danh',
+            'khóa tài khoản', 'mở khóa tài khoản'
+        ]
+        for term in compound_patterns:
+            if term in query_lower:
+                important_terms.append(term)
+
+        # Get FAQ questions for verification
+        faq_ids = [r["node_id"] for r in entity_results[:top_k * 2]]
+        if not faq_ids:
+            return entity_results
+
+        cypher = """
+        MATCH (f:FAQ)
+        WHERE f.id IN $faq_ids
+        RETURN f.id as id, f.question as question
+        """
+        faq_data = self.connector.execute_query(cypher, {"faq_ids": faq_ids})
+        faq_questions = {f["id"]: f["question"] for f in faq_data}
+
+        # Verify each result
+        verified_results = []
+        for result in entity_results:
+            faq_id = result["node_id"]
+            faq_question = faq_questions.get(faq_id, "")
+            faq_question_lower = faq_question.lower()
+
+            # Check 1: Important compound terms match
+            compound_match = False
+            for term in important_terms:
+                if term in faq_question_lower:
+                    compound_match = True
+                    break
+
+            # Check 2: Keyword overlap ratio
+            faq_terms = set(w for w in faq_question_lower.split() if w not in stopwords and len(w) > 1)
+            overlap = len(query_terms & faq_terms)
+            overlap_ratio = overlap / len(query_terms) if query_terms else 0
+
+            # Check 3: Similarity using SequenceMatcher
+            from difflib import SequenceMatcher
+            similarity = SequenceMatcher(None, query_lower, faq_question_lower).ratio()
+
+            # Decision: Keep if compound match OR high overlap OR high similarity
+            is_relevant = compound_match or overlap_ratio >= 0.3 or similarity >= 0.4
+
+            if is_relevant:
+                verified_results.append(result)
+                logger.debug(f"✅ Verified: {faq_question[:50]}... (overlap={overlap_ratio:.2f}, sim={similarity:.2f})")
+            else:
+                logger.info(f"❌ Filtered out irrelevant: {faq_question[:50]}... (overlap={overlap_ratio:.2f}, sim={similarity:.2f})")
+
+        # If we filtered out too many, trigger keyword fallback
+        # Threshold: If less than 30% of checked results are relevant, use keyword search instead
+        checked_count = min(len(entity_results), top_k * 2)  # We check up to top_k * 2 results
+        relevance_ratio = len(verified_results) / checked_count if checked_count > 0 else 0
+
+        if relevance_ratio < 0.3:
+            logger.warning(f"⚠️ Entity results mostly irrelevant ({len(verified_results)}/{checked_count} passed, ratio={relevance_ratio:.2%})")
+            return []  # Return empty to trigger keyword fallback
+
+        logger.info(f"✅ Entity relevance check: {len(verified_results)}/{checked_count} passed (ratio={relevance_ratio:.2%})")
+        return verified_results
 
     def _entity_graph_search(self, query_entities: Dict, top_k: int) -> List[Dict]:
         """
@@ -505,7 +798,29 @@ class Neo4jGraphRAGEngine:
                WHEN size($query_limits) > 0 AND size(faq_limits) > 0
                THEN 1.5  // STRONG BOOST for limit-related queries
                ELSE 0.0
-             END as limit_match_bonus
+             END as limit_match_bonus,
+             // NEW: BOOST for Feature match (CRITICAL FIX!)
+             CASE
+               WHEN size($query_features) > 0 AND
+                    ANY(qf IN $query_features WHERE
+                        ANY(ff IN faq_features WHERE
+                            toLower(ff) CONTAINS toLower(qf) OR
+                            toLower(qf) CONTAINS toLower(ff)))
+               THEN 2.5  // VERY STRONG BOOST for feature match (e.g., "liên kết ngân hàng")
+               WHEN size($query_features) > 0 AND size(faq_features) > 0
+               THEN -0.5  // Small penalty if FAQ has different feature
+               ELSE 0.0
+             END as feature_match_bonus,
+             // NEW: BOOST for Topic match (CRITICAL FIX!)
+             CASE
+               WHEN size($query_topics) > 0 AND
+                    ANY(qt IN $query_topics WHERE
+                        ANY(ft IN faq_topics WHERE
+                            toLower(ft) CONTAINS toLower(qt) OR
+                            toLower(qt) CONTAINS toLower(ft)))
+               THEN 2.0  // STRONG BOOST for topic match
+               ELSE 0.0
+             END as topic_match_bonus
 
         // Calculate graph-based score with entity-specific boosting (EXPANDED!)
         WITH f,
@@ -521,6 +836,8 @@ class Neo4jGraphRAGEngine:
              fee_match_bonus,
              status_match_bonus,
              limit_match_bonus,
+             feature_match_bonus,
+             topic_match_bonus,
              // Bonus for specific relationship types (REDUCED ERROR BOOST)
              CASE
                WHEN 'DESCRIBES_ERROR' IN rel_types THEN 1.5  // REDUCED from 3.0 (let error_match_bonus handle it)
@@ -528,6 +845,7 @@ class Neo4jGraphRAGEngine:
                WHEN 'MENTIONS_BANK' IN rel_types THEN 1.5
                WHEN 'MENTIONS_SERVICE' IN rel_types THEN 1.5
                WHEN 'SUGGESTS_ACTION' IN rel_types THEN 1.2
+               WHEN 'USES_FEATURE' IN rel_types THEN 1.3  // NEW: Boost for feature relationships
                ELSE 1.0
              END as rel_weight,
              // Exact match bonus
@@ -535,7 +853,8 @@ class Neo4jGraphRAGEngine:
 
         RETURN f.id as id,
                (entity_matches * rel_weight + exact_match_bonus + service_match_bonus + bank_match_bonus +
-                error_match_bonus + action_match_bonus + fee_match_bonus + status_match_bonus + limit_match_bonus) as graph_score,
+                error_match_bonus + action_match_bonus + fee_match_bonus + status_match_bonus + limit_match_bonus +
+                feature_match_bonus + topic_match_bonus) as graph_score,
                entity_matches,
                rel_types,
                entity_types,
@@ -546,7 +865,9 @@ class Neo4jGraphRAGEngine:
                action_match_bonus,
                fee_match_bonus,
                status_match_bonus,
-               limit_match_bonus
+               limit_match_bonus,
+               feature_match_bonus,
+               topic_match_bonus
         ORDER BY graph_score DESC
         LIMIT $top_k
         """
@@ -562,6 +883,8 @@ class Neo4jGraphRAGEngine:
                 "query_fees": fees,
                 "query_statuses": statuses,
                 "query_limits": limits,
+                "query_features": features,
+                "query_topics": topics,
                 "top_k": top_k
             }
         )
@@ -919,33 +1242,210 @@ class Neo4jGraphRAGEngine:
 
 
     def _keyword_search(self, query: str, top_k: int) -> List[Dict]:
-        """Search by keyword matching"""
-        # Simple keyword search in FAQ question and answer
-        cypher = """
-        MATCH (f:FAQ)
-        WHERE toLower(f.question) CONTAINS toLower($query)
-           OR toLower(f.answer) CONTAINS toLower($query)
-        RETURN f.id as id,
-               CASE
-                 WHEN toLower(f.question) CONTAINS toLower($query) THEN 2
-                 ELSE 1
-               END as match_count
-        ORDER BY match_count DESC
-        LIMIT $top_k
         """
+        Enhanced keyword search with EXACT MATCH priority
+        1. First, check for exact/near-exact question matches
+        2. Then, search by keywords
+        """
+        import re
+        from difflib import SequenceMatcher
 
-        results = self.connector.execute_query(
-            cypher,
-            {"query": query, "top_k": top_k}
-        )
+        query_lower = query.lower().strip()
 
-        # Normalize scores
+        # STEP 1: Check for exact/near-exact matches first (PRIORITY)
+        exact_match_cypher = """
+        MATCH (f:FAQ)
+        RETURN f.id as id, f.question as question
+        """
+        all_faqs = self.connector.execute_query(exact_match_cypher)
+
+        exact_matches = []
+        for faq in all_faqs:
+            faq_question = faq["question"].lower().strip()
+            similarity = SequenceMatcher(None, query_lower, faq_question).ratio()
+
+            if similarity > 0.85:  # 85%+ match = exact
+                exact_matches.append({
+                    "node_id": faq["id"],
+                    "score": similarity,
+                    "method": "exact_match"
+                })
+                logger.info(f"🎯 EXACT MATCH ({similarity:.0%}): {faq['question'][:60]}...")
+
+        if exact_matches:
+            # Sort by similarity and return
+            exact_matches.sort(key=lambda x: x["score"], reverse=True)
+            return exact_matches[:top_k]
+
+        # STEP 2: Keyword-based search
+        # Extract meaningful keywords (remove stopwords)
+        stopwords = {'tôi', 'bạn', 'là', 'có', 'thể', 'được', 'để', 'và', 'hoặc', 'hay',
+                     'này', 'đó', 'như', 'thế', 'nào', 'gì', 'sao', 'làm', 'muốn', 'cần',
+                     'của', 'cho', 'với', 'từ', 'đến', 'trong', 'ngoài', 'trên', 'dưới',
+                     'khi', 'nếu', 'thì', 'mà', 'vì', 'do', 'bởi', 'nhưng', 'còn', 'vẫn',
+                     'đang', 'sẽ', 'đã', 'rồi', 'chưa', 'không', 'có thể', 'phải', 'những'}
+
+        words = re.findall(r'[\w]+', query_lower)
+        keywords = [w for w in words if w not in stopwords and len(w) > 1]
+
+        # Important compound terms
+        important_compounds = [
+            'gói cước', 'data 3g', 'data 4g', '3g/4g', 'mobile money', 'vnpt money',
+            'vnpt pay', 'rút tiền', 'nạp tiền', 'chuyển tiền', 'liên kết', 'ngân hàng',
+            'biểu phí', 'hạn mức', 'thời gian', 'hotline', 'tổng đài', 'nhà mạng'
+        ]
+        compound_terms = [term for term in important_compounds if term in query_lower]
+
+        all_keywords = list(set(keywords + compound_terms))
+
+        if not all_keywords:
+            cypher = """
+            MATCH (f:FAQ)
+            WHERE toLower(f.question) CONTAINS toLower($query)
+               OR toLower(f.answer) CONTAINS toLower($query)
+            RETURN f.id as id, 1 as match_count
+            ORDER BY match_count DESC
+            LIMIT $top_k
+            """
+            results = self.connector.execute_query(cypher, {"query": query, "top_k": top_k})
+        else:
+            keyword_conditions = " OR ".join([
+                f"(toLower(f.question) CONTAINS '{kw}' OR toLower(f.answer) CONTAINS '{kw}')"
+                for kw in all_keywords
+            ])
+
+            cypher = f"""
+            MATCH (f:FAQ)
+            WHERE {keyword_conditions}
+            WITH f,
+                 size([kw IN $keywords WHERE toLower(f.question) CONTAINS kw]) * 2 +
+                 size([kw IN $keywords WHERE toLower(f.answer) CONTAINS kw]) as match_count
+            WHERE match_count > 0
+            RETURN f.id as id, match_count
+            ORDER BY match_count DESC
+            LIMIT $top_k
+            """
+
+            results = self.connector.execute_query(
+                cypher,
+                {"keywords": all_keywords, "top_k": top_k}
+            )
+
+            logger.info(f"Keyword search with terms {all_keywords}: found {len(results)} results")
+
         max_score = max([r["match_count"] for r in results]) if results else 1
         return [
             {
                 "node_id": r["id"],
                 "score": r["match_count"] / max_score,
                 "method": "keyword"
+            }
+            for r in results
+        ]
+
+    def _find_exact_match_faq(self, query: str, threshold: float = 0.85) -> List[Dict]:
+        """
+        Find FAQs that exactly or nearly match the query question.
+        This is critical for FAQs without entity links.
+
+        Args:
+            query: User query
+            threshold: Minimum similarity ratio (default 0.85 = 85%)
+
+        Returns:
+            List of exact match results with high scores
+        """
+        from difflib import SequenceMatcher
+
+        query_lower = query.lower().strip()
+
+        # Get all FAQ questions
+        cypher = "MATCH (f:FAQ) RETURN f.id as id, f.question as question"
+        all_faqs = self.connector.execute_query(cypher)
+
+        exact_matches = []
+        for faq in all_faqs:
+            if not faq.get("question"):
+                continue
+
+            faq_question = faq["question"].lower().strip()
+            similarity = SequenceMatcher(None, query_lower, faq_question).ratio()
+
+            if similarity >= threshold:
+                exact_matches.append({
+                    "node_id": faq["id"],
+                    "score": similarity,
+                    "method": "exact_match",
+                    "similarity": similarity
+                })
+                logger.info(f"🎯 EXACT MATCH FOUND ({similarity:.0%}): {faq['question'][:60]}...")
+
+        # Sort by similarity (highest first)
+        exact_matches.sort(key=lambda x: x["similarity"], reverse=True)
+        return exact_matches
+
+    def _intent_keyword_search(self, query: str, intent: str, top_k: int) -> List[Dict]:
+        """
+        Intent-based keyword search for specific intents (FEE, LIMIT, TIME)
+
+        Uses intent-specific keywords to find FAQs that may be missed by entity graph search.
+        This is particularly useful when:
+        - The query doesn't contain entities that match Neo4j nodes
+        - The FAQ question/answer contains relevant information but isn't linked properly
+
+        Args:
+            query: User query
+            intent: Classified intent (FEE, LIMIT, TIME)
+            top_k: Number of results to return
+
+        Returns:
+            List of {node_id, score, method}
+        """
+        # Define intent-specific keywords for search
+        intent_keywords = {
+            "FEE": ["phí", "miễn phí", "chi phí", "mất phí", "biểu phí", "chính sách phí"],
+            "LIMIT": ["hạn mức", "tối đa", "tối thiểu", "giới hạn", "số tiền tối đa", "vượt quá"],
+            "TIME": ["bao lâu", "thời gian", "ngày làm việc", "hoàn tiền", "ngay lập tức", "khi nào"]
+        }
+
+        keywords = intent_keywords.get(intent, [])
+        if not keywords:
+            return []
+
+        # Build Cypher query with OR conditions for all keywords
+        keyword_conditions = " OR ".join([
+            f"(toLower(f.question) CONTAINS '{kw}' OR toLower(f.answer) CONTAINS '{kw}')"
+            for kw in keywords
+        ])
+
+        cypher = f"""
+        MATCH (f:FAQ)
+        WHERE {keyword_conditions}
+        WITH f,
+             // Score based on how many keywords match in question (higher priority)
+             size([kw IN $keywords WHERE toLower(f.question) CONTAINS kw]) * 2 +
+             // Score based on how many keywords match in answer
+             size([kw IN $keywords WHERE toLower(f.answer) CONTAINS kw]) as keyword_score
+        RETURN f.id as id, keyword_score
+        ORDER BY keyword_score DESC
+        LIMIT $top_k
+        """
+
+        results = self.connector.execute_query(
+            cypher,
+            {"keywords": keywords, "top_k": top_k}
+        )
+
+        if not results:
+            return []
+
+        # Normalize scores
+        max_score = max([r["keyword_score"] for r in results]) if results else 1
+        return [
+            {
+                "node_id": r["id"],
+                "score": float(r["keyword_score"]) / max_score * 0.8,  # Scale down to not override entity results
+                "method": f"intent_keyword_{intent.lower()}"
             }
             for r in results
         ]
@@ -1033,7 +1533,8 @@ class Neo4jGraphRAGEngine:
         self,
         relevant_nodes: List[Dict],
         query_entities: Dict,
-        user_query: str = ""
+        user_query: str = "",
+        intent: str = ""
     ) -> List[Dict]:
         """
         Get context by traversing the graph from relevant nodes
@@ -1043,6 +1544,7 @@ class Neo4jGraphRAGEngine:
             relevant_nodes: List of {node_id, score}
             query_entities: Entities from query
             user_query: Original user query for exact match detection
+            intent: Query intent (TROUBLESHOOT, HOW_TO, etc.)
 
         Returns:
             List of context items
@@ -1060,24 +1562,44 @@ class Neo4jGraphRAGEngine:
                            f"Final: {relevance_score:.3f}, Methods: {node.get('methods', [])}")
 
             # Get FAQ, answer, and related info using Cypher
-            # UPDATED: Also retrieve Case nodes with their Steps
+            # UPDATED: Retrieve ALL entity types with ENRICHED PROPERTIES for comprehensive context
             cypher = """
             MATCH (f:FAQ {id: $node_id})
             OPTIONAL MATCH (f)-[:MENTIONS_SERVICE]->(s:Service)
             OPTIONAL MATCH (f)-[:MENTIONS_BANK]->(b:Bank)
             OPTIONAL MATCH (f)-[:DESCRIBES_ERROR]->(e:Error)
             OPTIONAL MATCH (f)-[:SUGGESTS_ACTION]->(act:Action)
-            OPTIONAL MATCH (act)-[:USES_FEATURE]->(feat:Feature)
+            OPTIONAL MATCH (f)-[:USES_FEATURE]->(feat:Feature)
+            OPTIONAL MATCH (f)-[:HAS_FEE]->(fee:Fee)
+            OPTIONAL MATCH (f)-[:HAS_LIMIT]->(lim:Limit)
+            OPTIONAL MATCH (f)-[:HAS_STATUS]->(stat:Status)
+            OPTIONAL MATCH (f)-[:HAS_TIMEFRAME]->(tf:TimeFrame)
+            OPTIONAL MATCH (f)-[:REQUIRES]->(req:Requirement)
+            OPTIONAL MATCH (f)-[:REQUIRES_DOCUMENT]->(doc:Document)
+            OPTIONAL MATCH (f)-[:AFFECTS_ACCOUNT]->(acc:AccountType)
+            OPTIONAL MATCH (f)-[:NAVIGATES_TO]->(ui:UIElement)
+            OPTIONAL MATCH (f)-[:CONTACTS]->(contact:ContactChannel)
             OPTIONAL MATCH (f)-[:SIMILAR_TO]-(similar:FAQ)
             OPTIONAL MATCH (f)-[:ABOUT]->(t:Topic)
+            OPTIONAL MATCH (f)-[:HAS_LINK]->(link:UsefulLink)
             RETURN f,
                    collect(DISTINCT s.name) as services,
                    collect(DISTINCT b.name) as banks,
-                   collect(DISTINCT e.name) as errors,
+                   collect(DISTINCT {name: e.name, solution: e.solution}) as errors,
                    collect(DISTINCT act.name) as actions,
                    collect(DISTINCT feat.name) as features,
+                   collect(DISTINCT fee.name) as fees,
+                   collect(DISTINCT lim.name) as limits,
+                   collect(DISTINCT stat.name) as statuses,
+                   collect(DISTINCT tf.name) as timeframes,
+                   collect(DISTINCT {name: req.name, description: req.description}) as requirements,
+                   collect(DISTINCT {name: doc.name, description: doc.description}) as documents,
+                   collect(DISTINCT acc.name) as account_types,
+                   collect(DISTINCT ui.name) as ui_elements,
+                   collect(DISTINCT {name: contact.name, phone: contact.phone, description: contact.description}) as contact_channels,
                    collect(DISTINCT {question: similar.question, id: similar.id}) as related_questions,
-                   collect(DISTINCT t.name) as topics
+                   collect(DISTINCT t.name) as topics,
+                   collect(DISTINCT {name: link.name, url: link.url, description: link.description}) as useful_links
             """
 
             result = self.connector.execute_query(cypher, {"node_id": node_id})
@@ -1108,9 +1630,11 @@ class Neo4jGraphRAGEngine:
             # EARLY EXACT MATCH BOOST (before final ranking)
             # This ensures exact matches stay in top_k even after aggregation
             question_text = faq.get("question", "")
+            exact_match_score = 0.0  # Track exact match for later use
             if query_lower and question_text:
                 from difflib import SequenceMatcher
                 similarity = SequenceMatcher(None, query_lower, question_text.lower()).ratio()
+                exact_match_score = similarity  # Store for later use
 
                 if similarity > 0.9:  # 90%+ exact match
                     # MAJOR BOOST - multiply score to ensure it stays in top_k
@@ -1151,17 +1675,17 @@ class Neo4jGraphRAGEngine:
                     for feature in extracted_features:
                         feature_lower = feature.lower()
 
-                        # Match "liên kết ngân hàng" or "ngân hàng liên kết"
-                        if 'liên kết' in feature_lower and 'ngân hàng' in feature_lower:
-                            if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
-                                score += 15  # Higher priority than keywords
-                                logger.info(f"  ✅ Feature match 'liên kết ngân hàng': {case_name}")
-
-                        # Match "Chuyển khoản ngân hàng"
-                        elif 'chuyển khoản' in feature_lower and 'ngân hàng' in feature_lower:
+                        # Match "Chuyển khoản ngân hàng" (CHECK THIS FIRST - more specific)
+                        if 'chuyển khoản' in feature_lower and 'ngân hàng' in feature_lower:
                             if 'chuyển khoản' in case_name or 'chuyển khoản' in case_desc or 'qr' in case_name:
-                                score += 15
+                                score += 20  # Higher score for exact match
                                 logger.info(f"  ✅ Feature match 'Chuyển khoản ngân hàng': {case_name}")
+
+                        # Match "liên kết ngân hàng" or "ngân hàng liên kết"
+                        elif 'liên kết' in feature_lower and 'ngân hàng' in feature_lower:
+                            if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
+                                score += 20  # Same as chuyển khoản
+                                logger.info(f"  ✅ Feature match 'liên kết ngân hàng': {case_name}")
 
                         # Match "QR code" or "mã QR"
                         elif 'qr' in feature_lower:
@@ -1176,8 +1700,20 @@ class Neo4jGraphRAGEngine:
                         for status in extracted_status:
                             status_lower = status.lower()
 
+                            # Match "đã nhận tiền" (HIGHEST PRIORITY - conditional)
+                            if 'đã nhận tiền' in status_lower or 'đã nhận được tiền' in status_lower:
+                                if 'đã nhận tiền' in case_status_values:
+                                    score += 25  # Higher than regular status
+                                    logger.info(f"  ✅ Conditional match 'đã nhận tiền': {case_name}")
+
+                            # Match "chưa nhận tiền" (HIGHEST PRIORITY - conditional)
+                            elif 'chưa nhận tiền' in status_lower or 'chưa nhận được tiền' in status_lower:
+                                if 'chưa nhận tiền' in case_status_values:
+                                    score += 25  # Higher than regular status
+                                    logger.info(f"  ✅ Conditional match 'chưa nhận tiền': {case_name}")
+
                             # Match "thành công"
-                            if 'thành công' in status_lower:
+                            elif 'thành công' in status_lower:
                                 if 'thành công' in case_status_values:
                                     score += 20
                                     logger.info(f"  ✅ Status match 'thành công': {case_name}")
@@ -1194,25 +1730,20 @@ class Neo4jGraphRAGEngine:
                                     score += 20
                                     logger.info(f"  ✅ Status match 'đang xử lý': {case_name}")
 
-                    # PRIORITY 3: Conditional matching (NEW - "đã nhận" vs "chưa nhận" tiền)
-                    if 'đã nhận được tiền' in query_lower or 'đã nhận tiền' in query_lower:
-                        if case_status_values and 'đã nhận tiền' in case_status_values:
-                            score += 25  # Highest priority for conditional
-                            logger.info(f"  ✅ Conditional match 'đã nhận tiền': {case_name}")
-
-                    elif 'chưa nhận được tiền' in query_lower or 'chưa nhận tiền' in query_lower:
-                        if case_status_values and 'chưa nhận tiền' in case_status_values:
-                            score += 25
-                            logger.info(f"  ✅ Conditional match 'chưa nhận tiền': {case_name}")
-
-                    # PRIORITY 4: Keyword-based matching (NEW - using keywords field as fallback)
-                    if score < 10 and case_keywords:  # Only if no strong match yet
+                    # PRIORITY 3: Keyword-based matching (NEW - using keywords field)
+                    # Use keywords to differentiate cases when Feature match is ambiguous
+                    if case_keywords:
+                        keyword_matches = 0
                         for keyword in case_keywords:
                             if isinstance(keyword, str) and keyword in query_lower:
-                                score += 5
+                                keyword_matches += 1
                                 logger.info(f"  ⚡ Keyword match '{keyword}': {case_name}")
 
-                    # PRIORITY 5: Fallback to old keyword matching
+                        # Bonus for multiple keyword matches (indicates better fit)
+                        if keyword_matches > 0:
+                            score += keyword_matches * 3  # 3 points per matched keyword
+
+                    # PRIORITY 4: Fallback to old keyword matching
                     if score == 0:  # Only if nothing else matched
                         if 'liên kết' in query_lower or 'liên kết trực tiếp' in query_lower:
                             if 'liên kết' in case_name or 'liên kết' in case_desc or 'bank_linked' in case_method:
@@ -1227,6 +1758,12 @@ class Neo4jGraphRAGEngine:
                         score += 1
 
                     case_scores.append((case, score))
+
+                # Log all case scores for debugging
+                logger.info(f"📊 Case Scores:")
+                for case, score in sorted(case_scores, key=lambda x: x[1], reverse=True):
+                    case_name = case.get('case_name', 'Unknown')
+                    logger.info(f"   {case_name}: {score} points")
 
                 # Select case with highest score
                 best_case, best_score = max(case_scores, key=lambda x: x[1])
@@ -1245,10 +1782,32 @@ class Neo4jGraphRAGEngine:
                 valid_steps = [s for s in raw_steps if s.get('text')]
                 case_steps = sorted(valid_steps, key=lambda x: x.get('number', 0))
 
-                logger.info(f"Selected Case: {selected_case.get('name')} ({len(case_steps)} steps)")
+                logger.info(f"✅ Selected Case: {selected_case.get('name')} ({len(case_steps)} steps, score: {best_score})")
 
             # NEW: Build answer from Case steps if available
-            if case_steps and selected_case:
+            # SPECIAL CASE: For TROUBLESHOOT with multiple cases, return FULL FAQ
+            # because user needs to know ALL possible cases/scenarios
+            full_answer = faq.get("answer", "")
+            num_cases = len(case_results) if case_results else 0
+
+            # Check if full_answer contains step-by-step instructions
+            has_step_instructions = bool(re.search(r'Bước\s*\d+', full_answer, re.IGNORECASE))
+
+            # Intents that need FULL FAQ when multiple cases exist
+            full_info_intents = {"TROUBLESHOOT", "WHY", "HOW_TO"}
+
+            # INFO_REQUEST with step instructions should also return full FAQ
+            # Because user is asking HOW TO do something (e.g., "vào mục nào?")
+            if intent in full_info_intents and num_cases > 1:
+                # TROUBLESHOOT/WHY/HOW_TO with multiple cases → return FULL FAQ answer
+                case_based_answer = full_answer
+                logger.info(f"📝 Answer path: Using FULL FAQ for {intent} (has {num_cases} cases)")
+            elif has_step_instructions and intent in {"INFO_REQUEST", "HOW_TO"}:
+                # FAQ has step-by-step instructions → return FULL answer
+                # This handles cases like "thanh toán hóa đơn viễn thông thì vào mục nào?"
+                case_based_answer = full_answer
+                logger.info(f"📝 Answer path: Using FULL FAQ for {intent} (has step instructions)")
+            elif case_steps and selected_case:
                 # Use Case steps instead of full FAQ answer
                 steps_text = "\n".join([
                     f'Bước {step["number"]}: {step["text"]}'
@@ -1256,12 +1815,27 @@ class Neo4jGraphRAGEngine:
                 ])
                 case_name = selected_case.get('name', '')
                 case_based_answer = f"{case_name}:\n\n{steps_text}"
+                logger.info(f"📝 Answer path: Using Step nodes from Case")
             elif selected_case and selected_case.get('description'):
-                # FALLBACK: If Case has description but no Step nodes, use description
+                # CRITICAL FIX: Case description is usually just a title/summary
+                # We should use the FULL FAQ answer instead when no Step nodes exist
                 case_desc = selected_case.get('description', '')
-                # Description already includes case name, so use it directly
-                case_based_answer = case_desc
-                logger.info(f"Using Case description (no Step nodes found)")
+
+                # Check if description is too short to be useful (likely just a title)
+                # A proper answer should have at least 100 chars with steps/details
+                if len(case_desc) < 100 or not any(
+                    indicator in case_desc.lower()
+                    for indicator in ['bước', '1.', '2.', '-', '•', 'chọn', 'nhấn', 'vào']
+                ):
+                    # Description is just a title - use FULL FAQ answer
+                    case_based_answer = full_answer
+                    logger.info(f"📝 Answer path: Case description too short ({len(case_desc)} chars), using FULL FAQ answer")
+                    logger.info(f"   Short description was: {case_desc[:100]}...")
+                else:
+                    # Description has actual steps/content
+                    case_based_answer = case_desc
+                    logger.info(f"📝 Answer path: Using Case description (has content)")
+                    logger.info(f"   Description preview: {case_desc[:200]}...")
             else:
                 # NO Case nodes - but check if we have Feature entities to filter answer
                 full_answer = faq.get("answer", "")
@@ -1273,10 +1847,12 @@ class Neo4jGraphRAGEngine:
                         full_answer, extracted_features, user_query
                     )
                     if case_based_answer and case_based_answer != full_answer:
-                        logger.info(f"✂️ Extracted matching case from multi-case answer")
+                        logger.info(f"📝 Answer path: Extracted matching case from multi-case answer")
                     else:
+                        logger.info(f"📝 Answer path: Using full FAQ answer (no case match)")
                         case_based_answer = full_answer
                 else:
+                    logger.info(f"📝 Answer path: Using full FAQ answer (no features)")
                     case_based_answer = full_answer
 
             context_item = {
@@ -1285,12 +1861,29 @@ class Neo4jGraphRAGEngine:
                 "answer": case_based_answer,  # Use Case-based answer if available
                 "relevance_score": relevance_score,
                 "related_entities": {
+                    # Core entities
                     "services": [s for s in data.get("services", []) if s],
                     "banks": [b for b in data.get("banks", []) if b],
-                    "errors": [e for e in data.get("errors", []) if e],
+                    # ENRICHED: Error now includes solution
+                    "errors": [e for e in data.get("errors", []) if e and e.get("name")],
                     "actions": [a for a in data.get("actions", []) if a],
                     "features": [f for f in data.get("features", []) if f],
                     "topics": [t for t in data.get("topics", []) if t],
+                    # NEW: Additional entity types for comprehensive context
+                    "fees": [f for f in data.get("fees", []) if f],
+                    "limits": [l for l in data.get("limits", []) if l],
+                    "statuses": [s for s in data.get("statuses", []) if s],
+                    "timeframes": [t for t in data.get("timeframes", []) if t],
+                    # ENRICHED: Requirement now includes description
+                    "requirements": [r for r in data.get("requirements", []) if r and r.get("name")],
+                    # ENRICHED: Document now includes description
+                    "documents": [d for d in data.get("documents", []) if d and d.get("name")],
+                    "account_types": [a for a in data.get("account_types", []) if a],
+                    "ui_elements": [u for u in data.get("ui_elements", []) if u],
+                    # ENRICHED: ContactChannel now includes phone and description
+                    "contact_channels": [c for c in data.get("contact_channels", []) if c and c.get("name")],
+                    # NEW: UsefulLink with url
+                    "useful_links": [l for l in data.get("useful_links", []) if l and l.get("url")],
                 },
                 "related_questions": [
                     {"question": rq["question"]}
@@ -1300,7 +1893,9 @@ class Neo4jGraphRAGEngine:
                 "alternative_actions": alternative_actions,
                 # NEW: Add Case info
                 "selected_case": selected_case.get('name') if selected_case else None,
-                "case_steps": case_steps
+                "case_steps": case_steps,
+                # CRITICAL: Track exact match score to skip focused extraction for exact matches
+                "exact_match_score": exact_match_score
             }
 
             context.append(context_item)
@@ -1325,6 +1920,31 @@ class Neo4jGraphRAGEngine:
         cases = []
         current_case = []
         current_case_name = None
+
+        # First, check if this is a simple bullet list (not multi-case answer)
+        # Bullet lists have:
+        # 1. Intro text before the first "- " item
+        # 2. Each "- " item is short (no sub-content, no nested steps)
+        has_intro_text = False
+        bullet_items = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith('- '):
+                bullet_items.append(stripped)
+            elif stripped and not bullet_items:
+                # Text before any bullet = intro text
+                has_intro_text = True
+
+        # If has intro text and bullet items are short (simple list), return full answer
+        if has_intro_text and bullet_items:
+            # Check if bullet items are short (no numbered steps, no nested content)
+            avg_bullet_len = sum(len(b) for b in bullet_items) / len(bullet_items) if bullet_items else 0
+            has_no_steps = not any(any(step in b for step in ['1.', '2.', '3.', 'Bước']) for b in bullet_items)
+
+            if avg_bullet_len < 150 and has_no_steps:
+                # This is a simple bullet list, not multi-case - return full answer
+                logger.debug(f"  📋 Detected simple bullet list (avg_len={avg_bullet_len:.0f}), returning full answer")
+                return answer
 
         for line in lines:
             # Check if line starts a new case (e.g., "- Nạp tiền từ ngân hàng liên kết:")
@@ -1472,12 +2092,37 @@ class Neo4jGraphRAGEngine:
             exact_match_boost = 0.0
             similarity = SequenceMatcher(None, query_lower, question_lower).ratio()
 
-            if similarity > 0.9:  # 90%+ similarity
-                exact_match_boost = 0.4  # BOOST for exact match (reduced to let entity filtering win)
+            if similarity > 0.95:  # 95%+ similarity - NEAR PERFECT MATCH
+                exact_match_boost = 5.0  # DOMINANT boost - this FAQ is almost certainly correct
+                logger.info(f"🎯 NEAR-PERFECT match ({similarity:.2%}): {result.get('question', '')[:80]}")
+            elif similarity > 0.9:  # 90%+ similarity
+                exact_match_boost = 2.0  # STRONG boost for exact match
                 logger.info(f"Exact match found ({similarity:.2%}): {result.get('question', '')[:80]}")
             elif similarity > 0.75:  # 75-90% similarity
-                exact_match_boost = 0.2  # SMALL boost for very similar (let entity filtering dominate)
+                exact_match_boost = 0.5  # MODERATE boost for very similar
                 logger.info(f"High similarity ({similarity:.2%}): {result.get('question', '')[:80]}")
+
+            # CRITICAL PENALTY: Check for missing CRITICAL keywords that change meaning
+            # e.g., "hủy liên kết" vs "liên kết" are semantically opposite!
+            critical_action_keywords = [
+                ("hủy", ["hủy", "gỡ bỏ", "xóa"]),  # query_keyword -> possible FAQ matches
+                ("gỡ bỏ", ["hủy", "gỡ bỏ", "xóa"]),
+                ("thêm", ["thêm", "tạo", "đăng ký"]),
+                ("tạo", ["thêm", "tạo", "đăng ký"]),
+                ("đổi", ["đổi", "thay đổi", "cập nhật"]),
+                ("mở khóa", ["mở khóa", "unlock"]),
+                ("khóa", ["khóa", "lock"]),
+            ]
+
+            for query_kw, faq_matches in critical_action_keywords:
+                if query_kw in query_lower:
+                    # Query has this critical keyword - check if FAQ has it
+                    if not any(faq_match in question_lower for faq_match in faq_matches):
+                        # FAQ is MISSING the critical keyword - heavy penalty
+                        # This prevents "hủy liên kết" matching "liên kết"
+                        exact_match_boost -= 3.0  # Significant penalty
+                        logger.info(f"⚠️ CRITICAL KEYWORD MISSING: Query has '{query_kw}' but FAQ doesn't - penalty applied")
+                        break
 
             # BOOST 0.5: TOPIC MATCHING (NEW - prevents wrong topic results)
             topic_boost = 0.0
@@ -1535,52 +2180,119 @@ class Neo4jGraphRAGEngine:
                 if "chưa" in question_lower or "không" in question_lower or "lỗi" in question_lower:
                     intent_boost += 0.3
 
+            elif intent == "FEE":
+                # BOOST for FAQs about fees/costs
+                fee_keywords = [
+                    "phí", "miễn phí", "chi phí", "mất phí", "có phí", "không phí",
+                    "biểu phí", "bảng phí", "phí dịch vụ", "chính sách phí"
+                ]
+                for keyword in fee_keywords:
+                    if keyword in question_lower:
+                        intent_boost += 0.5  # STRONG boost for fee in question
+                        logger.info(f"✓ FEE boost: Found '{keyword}' in question")
+                        break
+                    elif keyword in answer_lower:
+                        intent_boost += 0.25  # Moderate boost for fee in answer
+                        logger.info(f"✓ FEE boost: Found '{keyword}' in answer")
+                        break
+
+            elif intent == "LIMIT":
+                # BOOST for FAQs about limits
+                limit_keywords = [
+                    "hạn mức", "tối đa", "tối thiểu", "giới hạn", "limit",
+                    "số tiền tối đa", "số lượng tối đa", "vượt quá", "quá hạn mức"
+                ]
+                for keyword in limit_keywords:
+                    if keyword in question_lower:
+                        intent_boost += 0.5  # STRONG boost for limit in question
+                        logger.info(f"✓ LIMIT boost: Found '{keyword}' in question")
+                        break
+                    elif keyword in answer_lower:
+                        intent_boost += 0.25  # Moderate boost for limit in answer
+                        logger.info(f"✓ LIMIT boost: Found '{keyword}' in answer")
+                        break
+
+            elif intent == "TIME":
+                # BOOST for FAQs about time/duration
+                time_keywords = [
+                    "bao lâu", "thời gian", "ngay lập tức", "real-time",
+                    "ngày làm việc", "trong vòng", "sau khi", "mấy ngày",
+                    "khi nào", "hoàn tiền", "hoàn trả"
+                ]
+                for keyword in time_keywords:
+                    if keyword in question_lower:
+                        intent_boost += 0.5  # STRONG boost for time in question
+                        logger.info(f"✓ TIME boost: Found '{keyword}' in question")
+                        break
+                    elif keyword in answer_lower:
+                        intent_boost += 0.25  # Moderate boost for time in answer
+                        logger.info(f"✓ TIME boost: Found '{keyword}' in answer")
+                        break
+
             elif intent == "HOW_TO":
-                # STRONG BOOST for instructional content
-                how_to_signals = [
-                    "làm thế nào", "như thế nào", "cách", "hướng dẫn",
-                    "bước", "step", "để thực hiện", "quy trình", "thủ tục"
-                ]
-                for signal in how_to_signals:
-                    if signal in question_lower or signal in answer_lower:
-                        intent_boost += 0.4  # Increased from 0.3 to 0.4
-                        logger.info(f"✓ HOW_TO boost: Found '{signal}' in instructional FAQ")
-                        break
-
-                # CRITICAL: Detect procedural content with numbered steps (MAJOR boost)
+                # CRITICAL: Check for troubleshooting signals FIRST (in QUESTION - highest priority)
                 import re
-                # Look for patterns like "Bước 1:", "Step 1:", "1.", "2)", etc.
-                step_patterns = [
-                    r'bước\s+\d+[:\.\)]',  # "Bước 1:", "Bước 2."
-                    r'step\s+\d+[:\.\)]',   # "Step 1:", "Step 2)"
-                    r'^\d+[\.\)]',          # "1.", "2)" at start of line
+                troubleshoot_signals_question = [
+                    "bị lỗi", "báo lỗi", "gặp lỗi", "lỗi", "thất bại", "không thành công",
+                    "chưa nhận được", "bị trừ", "tại sao", "sao lại", "giao dịch thất bại",
+                    "không được", "không thể", "bị từ chối"
                 ]
-                has_steps = False
-                for pattern in step_patterns:
-                    if re.search(pattern, answer_lower, re.MULTILINE | re.IGNORECASE):
-                        has_steps = True
+                # Also check for "báo" + error message patterns
+                error_message_patterns = [
+                    r'báo\s+"[^"]*(?:lỗi|không\s+hợp\s+lệ|thất\s+bại)',  # "báo "lỗi..." or "báo "không hợp lệ..."
+                    r'báo\s+lỗi',  # "báo lỗi"
+                    r'báo\s+không',  # "báo không..."
+                ]
+
+                is_troubleshoot_faq = False
+                # Check text signals
+                for signal in troubleshoot_signals_question:
+                    if signal in question_lower:
+                        is_troubleshoot_faq = True
+                        logger.info(f"⚠️ HOW_TO STRONG penalty: Question contains troubleshooting signal '{signal}'")
                         break
 
-                if has_steps:
-                    intent_boost += 0.6  # MASSIVE boost for step-by-step instructions
-                    logger.info(f"✓ HOW_TO PROCEDURAL boost: FAQ contains numbered steps")
+                # Check regex patterns for error messages
+                if not is_troubleshoot_faq:
+                    for pattern in error_message_patterns:
+                        if re.search(pattern, question_lower):
+                            is_troubleshoot_faq = True
+                            logger.info(f"⚠️ HOW_TO STRONG penalty: Question contains error message pattern")
+                            break
 
-                # STRONG PENALTY for troubleshooting answers in HOW_TO queries
-                troubleshoot_signals = [
-                    "thất bại", "chưa nhận được", "không thành công",
-                    "bị lỗi", "bị trừ", "phải làm gì", "tại sao",
-                    "kiểm tra trạng thái", "giao dịch thất bại"
-                ]
-                has_troubleshoot = False
-                for signal in troubleshoot_signals:
-                    if signal in question_lower or signal in answer_lower:
-                        has_troubleshoot = True
-                        logger.info(f"⚠️ HOW_TO penalty: Found '{signal}' in troubleshooting FAQ")
-                        break
+                # If question is about troubleshooting, apply HEAVY penalty immediately
+                if is_troubleshoot_faq:
+                    intent_boost -= 1.5  # VERY HEAVY penalty for troubleshooting FAQs in HOW_TO queries (increased from 1.2)
+                else:
+                    # Only then check for instructional content
 
-                # Only apply penalty if NO how-to signals found (avoid penalizing mixed content)
-                if has_troubleshoot and intent_boost == 0.0:
-                    intent_boost -= 0.5  # Heavy penalty only if no how-to content
+                    # CRITICAL: Detect procedural content with numbered steps (HIGHEST priority)
+                    # Look for patterns like "Bước 1:", "Step 1:", "1.", "2)", etc.
+                    step_patterns = [
+                        r'bước\s+\d+[:\.\)]',  # "Bước 1:", "Bước 2."
+                        r'step\s+\d+[:\.\)]',   # "Step 1:", "Step 2)"
+                        r'^\d+[\.\)]',          # "1.", "2)" at start of line
+                    ]
+                    has_steps = False
+                    for pattern in step_patterns:
+                        if re.search(pattern, answer_lower, re.MULTILINE | re.IGNORECASE):
+                            has_steps = True
+                            break
+
+                    if has_steps:
+                        intent_boost += 2.5  # EXTREME boost for step-by-step instructions to overcome aggregation filtering
+                        logger.info(f"✓ HOW_TO PROCEDURAL boost: FAQ contains numbered steps")
+
+                    # STRONG BOOST for instructional signals (but lower priority than procedural)
+                    how_to_signals = [
+                        "làm thế nào", "như thế nào", "cách", "hướng dẫn",
+                        "bước", "step", "để thực hiện", "quy trình", "thủ tục"
+                    ]
+                    for signal in how_to_signals:
+                        if signal in question_lower or signal in answer_lower:
+                            intent_boost += 0.3  # Moderate boost for how-to keywords
+                            logger.info(f"✓ HOW_TO boost: Found '{signal}' in instructional FAQ")
+                            break
 
             # BOOST 2: Error-specific boosting
             error_boost = 0.0
@@ -1600,6 +2312,7 @@ class Neo4jGraphRAGEngine:
             keyword_boost = min(overlap * 0.02, 0.2)  # Cap at 0.2
 
             # Calculate final score (EXACT MATCH gets highest priority)
+            # RE-ENABLED intent_boost for FEE, LIMIT, TIME intents
             final_score = base_score + exact_match_boost + topic_boost + intent_boost + error_boost + keyword_boost
 
             # Update result
@@ -1651,20 +2364,316 @@ class Neo4jGraphRAGEngine:
             }
             logger.info(f"Using Case-based answer: {case_info['case_name']}")
 
+        # ENHANCED: Use 3-Layer Focused Answer Extraction
+        # Priority: Entity Direct → Case-Based → LLM → FAQ
+        final_answer = top_result["answer"]
+        extraction_info = None
+
+        # Check if we should use focused extraction
+        use_focused_extraction = getattr(config, 'USE_FOCUSED_EXTRACTION', True)
+
+        # ============================================================
+        # CRITICAL FIX: SKIP FOCUSED EXTRACTION FOR HIGH EXACT MATCHES
+        # ============================================================
+        # If the FAQ question is an exact or near-exact match (>90% similarity),
+        # the original answer is already correct - DON'T modify it!
+        # This prevents LLM from "summarizing" and changing format/content
+        is_exact_match = top_result.get("exact_match_score", 0) >= 0.90
+        if is_exact_match:
+            logger.info(f"🎯 EXACT MATCH DETECTED ({top_result.get('exact_match_score', 0):.0%}) - SKIPPING focused extraction to preserve original answer")
+            use_focused_extraction = False
+
+        # CRITICAL: For specific intents (FEE, LIMIT, TIME), extract ONLY if not exact match
+        specific_intents = ["FEE", "LIMIT", "TIME"]
+        general_intents = ["TROUBLESHOOT", "HOW_TO", "COMPARISON"]
+
+        should_extract = False
+        if use_focused_extraction:
+            if intent in specific_intents:
+                # Extract for specific intents (user wants specific info) - but only if NOT exact match
+                should_extract = True
+                logger.info(f"Specific intent ({intent}) - will use focused extraction")
+            elif intent in general_intents and len(final_answer) > 300:
+                # Extract for general intents only if answer is long AND not exact match
+                should_extract = True
+                logger.info(f"Long answer ({len(final_answer)} chars) for {intent} - will use focused extraction")
+
+        if should_extract:
+            logger.info(f"🎯 Using FOCUSED EXTRACTION for intent: {intent}")
+            try:
+                # Merge query entities with graph entities for comprehensive context
+                merged_entities = {**query_entities} if query_entities else {}
+                graph_entities = top_result.get("related_entities", {})
+                if graph_entities:
+                    # Add graph entities (fees, limits, timeframes, etc.)
+                    for key, value in graph_entities.items():
+                        if value:  # Only add non-empty
+                            merged_entities[key] = value
+
+                # Use 3-Layer Focused Extractor (Entity → Case → LLM)
+                focused_result = self.focused_extractor.extract_focused_answer(
+                    user_query=query,
+                    faq_answer=final_answer,
+                    faq_question=top_result["question"],
+                    intent=intent,
+                    entities=merged_entities,
+                    graph_entities=graph_entities
+                )
+
+                # Check if extraction improved the answer
+                if focused_result.confidence >= 0.6:
+                    # Only use extracted answer if it's substantially shorter
+                    reduction_ratio = focused_result.answer_length / focused_result.original_length
+
+                    # TROUBLESHOOT và HOW_TO không cần giảm kích thước - giữ đầy đủ thông tin
+                    full_info_intents = {"TROUBLESHOOT", "HOW_TO"}
+                    is_full_info_extraction = (
+                        focused_result.source.value == "llm_extracted" and
+                        "llm_extraction_full" in str(focused_result.extracted_info.get("method", ""))
+                    )
+
+                    if (reduction_ratio < 0.8 or
+                        focused_result.source.value in ["entity_direct", "case_matched"] or
+                        intent in full_info_intents or
+                        is_full_info_extraction):
+                        final_answer = focused_result.answer
+                        extraction_info = {
+                            "extraction_type": focused_result.source.value,
+                            "confidence": focused_result.confidence,
+                            "filter_applied": focused_result.filter_applied,
+                            "reduction": f"{(1-reduction_ratio)*100:.0f}%"
+                        }
+                        logger.info(f"✅ Focused extraction successful: {focused_result.source.value}")
+                        logger.info(f"   Original: {focused_result.original_length} chars → Focused: {focused_result.answer_length} chars ({extraction_info['reduction']} reduction)")
+                    else:
+                        logger.info(f"Focused extraction didn't reduce answer enough ({reduction_ratio:.0%}), using original")
+                else:
+                    logger.info(f"Focused extraction low confidence: {focused_result.confidence:.2%}")
+
+            except Exception as e:
+                logger.error(f"Focused extraction failed: {e}, using original answer")
+
+        # CRITICAL: Check if FAQ actually answers the SPECIFIC question
+        # If user asks about specific entity (e.g., "Vietcombank") but FAQ doesn't mention it,
+        # return "không biết" instead of generic answer
+        specific_entity_check = self._check_specific_entity_relevance(
+            query=query,
+            query_entities=query_entities,
+            faq_question=top_result["question"],
+            faq_answer=final_answer,
+            intent=intent
+        )
+
+        if not specific_entity_check["is_relevant"]:
+            logger.warning(f"❌ FAQ doesn't answer specific question: {specific_entity_check['reason']}")
+            return {
+                "status": "no_specific_answer",
+                "question": top_result["question"],
+                "answer": specific_entity_check["fallback_message"],
+                "confidence": 0.3,  # Low confidence to indicate uncertainty
+                "intent": intent,
+                "faq_id": top_result.get("node_id"),  # Include FAQ ID for context tracking
+                "missing_entity": specific_entity_check.get("missing_entity"),
+                "related_entities": top_result["related_entities"],
+                "alternative_actions": top_result["alternative_actions"],
+                "related_questions": top_result["related_questions"][:3],
+                "all_results": context[:config.TOP_K_RETRIEVAL],
+            }
+
         response = {
             "status": "success",
             "question": top_result["question"],
-            "answer": top_result["answer"],  # Already formatted with Case steps
+            "answer": final_answer,
+            "original_answer": top_result["answer"] if extraction_info else None,  # Keep original for reference
             "confidence": top_result["relevance_score"],
+            "intent": intent,
+            "faq_id": top_result.get("node_id"),  # CRITICAL: Include FAQ ID for Mem0 follow-up tracking
             "related_entities": top_result["related_entities"],
             "alternative_actions": top_result["alternative_actions"],
             "related_questions": top_result["related_questions"][:3],
             "all_results": context[:config.TOP_K_RETRIEVAL],
-            # NEW: Add case info
-            "case_info": case_info if case_info else None
+            # NEW: Add case info and extraction info
+            "case_info": case_info if case_info else None,
+            "extraction_info": extraction_info
         }
 
         return response
+
+    def _check_specific_entity_relevance(
+        self,
+        query: str,
+        query_entities: Dict,
+        faq_question: str,
+        faq_answer: str,
+        intent: str
+    ) -> Dict:
+        """
+        Check if the FAQ actually answers the SPECIFIC question asked.
+
+        CRITICAL: If user asks about a specific entity (e.g., "Vietcombank", "VPBank")
+        but the FAQ doesn't mention that entity, return "không biết" instead of generic answer.
+
+        This prevents the chatbot from answering with unrelated information when
+        the specific data doesn't exist in the database.
+
+        Args:
+            query: User's question
+            query_entities: Entities extracted from query
+            faq_question: The matched FAQ question
+            faq_answer: The FAQ answer (or extracted answer)
+            intent: Query intent
+
+        Returns:
+            {
+                "is_relevant": True/False,
+                "reason": str,  # Why it's not relevant
+                "missing_entity": str,  # The specific entity that's missing
+                "fallback_message": str  # Message to show user
+            }
+        """
+        query_lower = query.lower()
+        faq_question_lower = faq_question.lower()
+        faq_answer_lower = faq_answer.lower()
+        combined_faq = faq_question_lower + " " + faq_answer_lower
+
+        # =====================================================
+        # CHECK 1: Specific Bank Names
+        # =====================================================
+        # List of specific bank names that user might ask about
+        specific_banks = [
+            "vietcombank", "vcb", "vietinbank", "viettinbank", "ctg",
+            "techcombank", "tcb", "bidv", "agribank", "vpbank", "vp bank",
+            "mbbank", "mb bank", "acb", "sacombank", "shb", "seabank",
+            "tpbank", "tp bank", "oceanbank", "lienvietpostbank", "lpb",
+            "vib", "hdbank", "hd bank", "eximbank", "msb", "maritime",
+            "pvcombank", "baovietbank", "namabank", "ncb", "abbank",
+            "bac a bank", "baca bank", "kienlongbank", "dongabank",
+            "scb", "gpbank", "vietabank", "vietbank", "publicbank"
+        ]
+
+        # Check if query mentions a specific bank
+        query_banks = query_entities.get("Bank", [])
+        mentioned_bank = None
+
+        # Also check via text matching for banks not extracted by entity extractor
+        for bank in specific_banks:
+            if bank in query_lower:
+                mentioned_bank = bank
+                break
+
+        # If entity extractor found banks, use those
+        if query_banks:
+            for bank in query_banks:
+                bank_lower = bank.lower()
+                # Check if this specific bank is mentioned in FAQ
+                if bank_lower not in combined_faq:
+                    # Check common aliases
+                    aliases = {
+                        "vietcombank": ["vcb", "vietcombank"],
+                        "vcb": ["vcb", "vietcombank"],
+                        "vietinbank": ["viettinbank", "vietinbank", "ctg"],
+                        "techcombank": ["techcombank", "tcb"],
+                        "vpbank": ["vpbank", "vp bank", "vp"],
+                        "mbbank": ["mbbank", "mb bank", "mb"],
+                    }
+                    bank_aliases = aliases.get(bank_lower, [bank_lower])
+                    bank_found = any(alias in combined_faq for alias in bank_aliases)
+
+                    if not bank_found:
+                        logger.info(f"⚠️ Specific bank '{bank}' NOT found in FAQ")
+                        return {
+                            "is_relevant": False,
+                            "reason": f"FAQ doesn't mention specific bank: {bank}",
+                            "missing_entity": bank,
+                            "fallback_message": f"Xin lỗi, tôi không có thông tin cụ thể về {bank}. "
+                                              f"Bạn có thể liên hệ Hotline 1900 8198 hoặc truy cập "
+                                              f"https://vnptpay.vn/web/trogiup/bieuphi_mm để xem biểu phí chi tiết."
+                        }
+
+        # Also check mentioned_bank from text matching
+        if mentioned_bank and mentioned_bank not in combined_faq:
+            # Check aliases
+            aliases = {
+                "vietcombank": ["vcb", "vietcombank"],
+                "vcb": ["vcb", "vietcombank"],
+                "vietinbank": ["viettinbank", "vietinbank", "ctg"],
+                "techcombank": ["techcombank", "tcb"],
+                "vpbank": ["vpbank", "vp bank", "vp"],
+                "mbbank": ["mbbank", "mb bank", "mb"],
+            }
+            bank_aliases = aliases.get(mentioned_bank, [mentioned_bank])
+            bank_found = any(alias in combined_faq for alias in bank_aliases)
+
+            if not bank_found:
+                logger.info(f"⚠️ Specific bank '{mentioned_bank}' NOT found in FAQ")
+                return {
+                    "is_relevant": False,
+                    "reason": f"FAQ doesn't mention specific bank: {mentioned_bank}",
+                    "missing_entity": mentioned_bank,
+                    "fallback_message": f"Xin lỗi, tôi không có thông tin cụ thể về {mentioned_bank}. "
+                                      f"Bạn có thể liên hệ Hotline 1900 8198 hoặc truy cập "
+                                      f"https://vnptpay.vn/web/trogiup/bieuphi_mm để xem biểu phí chi tiết."
+                }
+
+        # =====================================================
+        # CHECK 2: Specific Amount/Number Questions
+        # =====================================================
+        # If user asks for specific amount (e.g., "1 triệu", "500k") but FAQ is generic
+        import re
+        amount_patterns = [
+            r'(\d+)\s*(triệu|tr|nghìn|ngàn|k|đồng|vnd)',  # "1 triệu", "500k"
+            r'(bao nhiêu|mức|số tiền)\s+(\d+)',  # "bao nhiêu 1000000"
+        ]
+
+        has_specific_amount = False
+        for pattern in amount_patterns:
+            if re.search(pattern, query_lower):
+                has_specific_amount = True
+                break
+
+        # For FEE/LIMIT intents, if user asks with specific amount but FAQ gives general link
+        if intent in ["FEE", "LIMIT"] and has_specific_amount:
+            # Check if FAQ actually contains specific numbers/amounts
+            has_faq_amounts = bool(re.search(r'\d+[.,]?\d*\s*(đồng|vnd|%|triệu|nghìn)', faq_answer_lower))
+            if not has_faq_amounts and "biểu phí" in faq_answer_lower:
+                # FAQ just redirects to fee page, doesn't have specific info
+                logger.info(f"⚠️ User asked for specific amount but FAQ only provides general link")
+                # Allow this case - it's acceptable to provide a link
+                pass
+
+        # =====================================================
+        # CHECK 3: Very low similarity between query and FAQ question
+        # =====================================================
+        from difflib import SequenceMatcher
+        similarity = SequenceMatcher(None, query_lower, faq_question_lower).ratio()
+
+        # If similarity is extremely low AND FAQ doesn't contain key query terms
+        if similarity < 0.25:
+            # Extract key terms from query (excluding stopwords)
+            stopwords = {'tôi', 'bạn', 'là', 'có', 'thể', 'được', 'để', 'và', 'hoặc', 'hay',
+                        'này', 'đó', 'như', 'thế', 'nào', 'gì', 'sao', 'làm', 'muốn', 'cần',
+                        'của', 'cho', 'với', 'từ', 'đến', 'trong', 'bao', 'nhiêu', 'ở', 'đâu'}
+            query_terms = [w for w in query_lower.split() if w not in stopwords and len(w) > 2]
+
+            # Check how many query terms appear in FAQ
+            terms_found = sum(1 for term in query_terms if term in combined_faq)
+            term_coverage = terms_found / len(query_terms) if query_terms else 1.0
+
+            if term_coverage < 0.3:
+                logger.info(f"⚠️ Very low relevance: similarity={similarity:.2%}, term_coverage={term_coverage:.2%}")
+                return {
+                    "is_relevant": False,
+                    "reason": f"FAQ has very low relevance to query (similarity: {similarity:.0%})",
+                    "missing_entity": None,
+                    "fallback_message": "Xin lỗi, tôi không tìm thấy thông tin chính xác cho câu hỏi của bạn. "
+                                      "Bạn có thể liên hệ Hotline 1900 8198 để được hỗ trợ trực tiếp."
+                }
+
+        # All checks passed - FAQ is relevant
+        return {
+            "is_relevant": True,
+            "reason": "FAQ is relevant to query"
+        }
 
     def _query_steps_by_faq_id(
         self,
@@ -2142,6 +3151,284 @@ class Neo4jGraphRAGEngine:
             logger.error(f"Failed to query steps from graph: {e}")
             return None
 
+    def _handle_follow_up_query(
+        self,
+        user_query: str,
+        follow_up_context: Dict,
+        query_entities: Dict,
+        intent: str,
+        intent_confidence: float,
+        top_k: int = 5
+    ) -> Dict:
+        """
+        Handle follow-up queries using Mem0 context
+
+        This method prioritizes searching within the previous FAQ's context
+        to find the specific case/information the user is asking about.
+
+        Args:
+            user_query: User's current query
+            follow_up_context: Context from Mem0 including:
+                - topic: Previous conversation topic
+                - faq_id: Previous FAQ ID to search within
+                - context_needed: What user is asking about
+                - memories: Relevant memories from Mem0
+            query_entities: Extracted entities from current query
+            intent: Classified intent
+            intent_confidence: Intent classification confidence
+            top_k: Number of results to return
+
+        Returns:
+            Query result with contextual answer
+        """
+        topic = follow_up_context.get("topic", "")
+        faq_id = follow_up_context.get("faq_id")
+        context_needed = follow_up_context.get("context_needed", "")
+        memories = follow_up_context.get("memories", [])
+
+        logger.info(f"🔗 Follow-up handling: topic='{topic}', faq_id='{faq_id}'")
+        logger.info(f"   Context needed: {context_needed}")
+
+        # Strategy 1: If we have FAQ ID, search within that FAQ's cases
+        if faq_id:
+            logger.info(f"📍 Searching within FAQ {faq_id} for follow-up context")
+            faq_result = self._search_within_faq(
+                faq_id=faq_id,
+                search_terms=[user_query, context_needed],
+                intent=intent,
+                query_entities=query_entities
+            )
+
+            if faq_result and faq_result.get("status") == "success":
+                logger.info(f"✅ Found answer within FAQ {faq_id}")
+                faq_result["is_follow_up"] = True
+                faq_result["follow_up_topic"] = topic
+                faq_result["follow_up_faq_id"] = faq_id
+                return faq_result
+
+        # Strategy 2: Search with topic context if FAQ search failed
+        if topic:
+            logger.info(f"📍 Searching with topic context: '{topic}'")
+
+            # Augment entities with topic
+            enhanced_entities = query_entities.copy()
+            if "Topic" not in enhanced_entities or not enhanced_entities["Topic"]:
+                enhanced_entities["Topic"] = [topic]
+            elif topic not in enhanced_entities.get("Topic", []):
+                enhanced_entities["Topic"].append(topic)
+
+            # Search with enhanced entities
+            relevant_nodes = self._find_relevant_nodes(
+                query=user_query,
+                query_entities=enhanced_entities,
+                top_k=top_k * 2,
+                intent=intent
+            )
+
+            if relevant_nodes:
+                # Get context and rank
+                context = self._get_graph_context(relevant_nodes, enhanced_entities, user_query, intent)
+                results = self._rank_results(context, user_query, intent, enhanced_entities)
+
+                if results.get("status") == "success":
+                    results["is_follow_up"] = True
+                    results["follow_up_topic"] = topic
+
+                    # Add steps if present
+                    if results.get("answer"):
+                        steps = self.step_extractor.extract_from_answer(results["answer"])
+                        results["steps"] = steps
+                        results["has_steps"] = len(steps) > 0
+
+                    return results
+
+        # Strategy 3: Fall back to normal query (no context found)
+        logger.warning("⚠️ Follow-up context search failed, falling back to normal query")
+
+        # Normal search
+        relevant_nodes = self._find_relevant_nodes(user_query, query_entities, top_k * 2, intent)
+
+        if not relevant_nodes:
+            return {
+                "status": "no_results",
+                "question": user_query,
+                "answer": "Xin lỗi, tôi không tìm thấy thông tin phù hợp. Bạn có thể mô tả chi tiết hơn không?",
+                "confidence": 0,
+                "related_entities": {},
+                "related_questions": [],
+                "all_results": [],
+                "is_follow_up": True,
+                "follow_up_topic": topic
+            }
+
+        context = self._get_graph_context(relevant_nodes, query_entities, user_query, intent)
+        results = self._rank_results(context, user_query, intent, query_entities)
+
+        results["is_follow_up"] = True
+        results["follow_up_topic"] = topic
+
+        return results
+
+    def _search_within_faq(
+        self,
+        faq_id: str,
+        search_terms: List[str],
+        intent: str,
+        query_entities: Dict
+    ) -> Optional[Dict]:
+        """
+        Search within a specific FAQ for relevant cases/information
+
+        Args:
+            faq_id: FAQ ID to search within
+            search_terms: Terms to search for
+            intent: User's intent
+            query_entities: Extracted entities
+
+        Returns:
+            Search result or None
+        """
+        try:
+            # Query the FAQ and its cases
+            cypher = """
+            MATCH (f:FAQ {id: $faq_id})
+            OPTIONAL MATCH (f)-[:HAS_CASE]->(c:Case)
+            OPTIONAL MATCH (c)-[:HAS_STEP]->(s:Step)
+            RETURN f,
+                   collect(DISTINCT {
+                       case_id: c.id,
+                       description: c.description,
+                       condition: c.condition,
+                       steps: collect(DISTINCT {step_num: s.step_number, content: s.content})
+                   }) as cases
+            """
+
+            result = self.connector.query(cypher, {"faq_id": faq_id})
+
+            if not result:
+                return None
+
+            record = result[0]
+            faq_node = record["f"]
+            cases = record["cases"]
+
+            if not faq_node:
+                return None
+
+            faq_question = faq_node.get("question", "")
+            faq_answer = faq_node.get("answer", "")
+
+            logger.info(f"   Found FAQ with {len(cases)} cases")
+
+            # Search for matching case based on search terms
+            best_case = None
+            best_score = 0
+            search_lower = " ".join(search_terms).lower()
+
+            # Extract key terms for matching
+            status_terms = []
+            if "đang xử lý" in search_lower or "dang xu ly" in search_lower:
+                status_terms.append("đang xử lý")
+                status_terms.append("chưa hoàn thành")
+            if "thành công" in search_lower or "thanh cong" in search_lower:
+                status_terms.append("thành công")
+                status_terms.append("hoàn tất")
+            if "thất bại" in search_lower or "that bai" in search_lower:
+                status_terms.append("thất bại")
+                status_terms.append("không thành công")
+
+            # Also check for time-related follow-ups
+            if "thời gian" in search_lower or "bao lâu" in search_lower:
+                status_terms.append("ngày")
+                status_terms.append("giờ")
+                status_terms.append("thời gian")
+
+            for case in cases:
+                if not case.get("description"):
+                    continue
+
+                case_desc = case.get("description", "").lower()
+                case_condition = (case.get("condition") or "").lower()
+
+                score = 0
+
+                # Check status term matches
+                for term in status_terms:
+                    if term in case_desc or term in case_condition:
+                        score += 10
+                        logger.info(f"   ✅ Case match on '{term}': {case_desc[:50]}...")
+
+                # Check general search term overlap
+                search_words = set(search_lower.split())
+                case_words = set(case_desc.split())
+                overlap = len(search_words & case_words)
+                score += overlap * 2
+
+                if score > best_score:
+                    best_score = score
+                    best_case = case
+
+            if best_case and best_score > 5:
+                logger.info(f"   ✅ Best matching case (score={best_score}): {best_case.get('description', '')[:50]}...")
+
+                # Build answer from case
+                case_answer = best_case.get("description", "")
+
+                # Add steps if available
+                steps = best_case.get("steps", [])
+                if steps:
+                    valid_steps = [s for s in steps if s.get("content")]
+                    if valid_steps:
+                        valid_steps.sort(key=lambda x: x.get("step_num", 0))
+                        step_text = "\n".join([f"{s['step_num']}. {s['content']}" for s in valid_steps])
+                        case_answer += f"\n\nCác bước thực hiện:\n{step_text}"
+
+                return {
+                    "status": "success",
+                    "question": faq_question,
+                    "answer": case_answer,
+                    "confidence": min(best_score / 20, 1.0),
+                    "faq_id": faq_id,
+                    "case_id": best_case.get("case_id"),
+                    "related_entities": query_entities,
+                    "related_questions": [],
+                    "all_results": [],
+                    "intent": intent
+                }
+
+            # No matching case found, but we have the FAQ - use focused extraction
+            if faq_answer and len(faq_answer) > 100:
+                logger.info("   No specific case matched, using focused extraction on FAQ")
+
+                # Use focused extractor to get relevant part
+                if config.USE_FOCUSED_EXTRACTION:
+                    focused_result = self.focused_extractor.extract(
+                        faq_content=faq_answer,
+                        user_query=" ".join(search_terms),
+                        intent=intent,
+                        entities=query_entities
+                    )
+
+                    if focused_result.get("success"):
+                        return {
+                            "status": "success",
+                            "question": faq_question,
+                            "answer": focused_result.get("answer", faq_answer),
+                            "confidence": focused_result.get("confidence", 0.7),
+                            "faq_id": faq_id,
+                            "related_entities": query_entities,
+                            "related_questions": [],
+                            "all_results": [],
+                            "intent": intent,
+                            "extraction_method": focused_result.get("method")
+                        }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error searching within FAQ {faq_id}: {e}")
+            return None
+
     def _handle_step_continuation(
         self,
         user_query: str,
@@ -2409,7 +3696,7 @@ Nếu bạn vẫn gặp vấn đề hoặc cần hỗ trợ thêm, vui lòng li�
                 logger.info(f"   Added topic to query: '{base_query}'")
 
             relevant_nodes = self._find_relevant_nodes(base_query, query_entities, 5, "HOW_TO")
-            context = self._get_graph_context(relevant_nodes, query_entities, base_query)
+            context = self._get_graph_context(relevant_nodes, query_entities, base_query, "HOW_TO")
             return self._rank_results(context, base_query, "HOW_TO", query_entities)
 
         # Generate continuation response from cached steps
