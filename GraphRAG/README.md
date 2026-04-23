@@ -1,67 +1,81 @@
-# VNPT Money GraphRAG Chatbot (LLM-based)
+# VNPT Money GraphRAG Chatbot
 
-Hệ thống chatbot FAQ cho VNPT Money sử dụng **Knowledge Graph** và **LLM** để trả lời câu hỏi.
+Chatbot hỗ trợ khách hàng VNPT Money sử dụng **GraphRAG** (Graph-based Retrieval Augmented Generation) kết hợp với **LLM** (Large Language Model).
 
-## 🎯 Tính năng
+## Tính năng chính
 
-- ✅ **LLM-based Entity Extraction**: Sử dụng OpenAI ChatGPT (hoặc Google Gemini) để trích xuất entities và relationships
-- ✅ **Knowledge Graph**: Neo4j graph database để lưu trữ tri thức có cấu trúc
-- ✅ **Semantic Search**: Tìm kiếm ngữ nghĩa với embeddings
-- ✅ **GraphRAG**: Kết hợp graph traversal và semantic retrieval
-- ✅ **Vietnamese Support**: Hỗ trợ đầy đủ tiếng Việt
-- ✅ **Flexible LLM Provider**: Hỗ trợ cả OpenAI và Gemini
+- **GraphRAG**: Sử dụng Neo4j Knowledge Graph để lưu trữ và truy vấn FAQ
+- **Multi-LLM Support**: Hỗ trợ OpenAI API và vLLM (self-hosted Qwen2.5-DPO)
+- **Intent Classification**: Phân loại ý định người dùng (FEE, LIMIT, TIME, HOW_TO, TROUBLESHOOT, ...)
+- **Entity Extraction**: Trích xuất entities từ câu hỏi (ngân hàng, dịch vụ, lỗi, ...)
+- **Focused Answer Extraction**: Trả lời đúng trọng tâm thay vì trả về toàn bộ FAQ
+- **Conversation Memory**: Theo dõi ngữ cảnh hội thoại với Mem0
+- **Follow-up Detection**: Phát hiện câu hỏi tiếp nối để duy trì context
+- **Vietnamese Support**: Hỗ trợ đầy đủ tiếng Việt
 
-## 📦 Cấu trúc Project
+## Kiến trúc hệ thống
 
 ```
-graphRAGChatBot/
-├── config.py                        # Cấu hình
-├── llm_entity_extractor.py         # LLM entity extractor
-├── neo4j_connector.py              # Neo4j connector
-├── neo4j_graph_builder_llm.py      # Graph builder (LLM-based)
-├── neo4j_rag_engine.py             # RAG engine
-├── chatbot.py                      # Chatbot interface
-├── main.py                         # Main entry point
-├── test_llm_extraction.py          # Test LLM extraction
-├── visualize_graph_schema.py       # Visualize graph
-├── requirements.txt                # Dependencies
-├── README_LLM_EXTRACTION.md        # Chi tiết về LLM extraction
-└── data/                           # Data directory
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Streamlit UI  │────▶│    Chatbot      │────▶│   Neo4j Graph   │
+│  (app_streamlit)│     │   (chatbot.py)  │     │   (Knowledge)   │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                 │
+                    ┌────────────┼────────────┐
+                    ▼            ▼            ▼
+            ┌───────────┐ ┌───────────┐ ┌───────────┐
+            │  Intent   │ │  Entity   │ │  Focused  │
+            │Classifier │ │ Extractor │ │ Extractor │
+            └───────────┘ └───────────┘ └───────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │   LLM (vLLM / OpenAI)   │
+                    │   Qwen2.5-DPO Finetune  │
+                    └─────────────────────────┘
 ```
 
-## 🚀 Quick Start
+## Cài đặt
 
-### 1. Cài đặt dependencies
+### 1. Clone repository
+
+```bash
+git clone https://github.com/GiangNV-HUST/vnpt-money-chatbot.git
+cd vnpt-money-chatbot/Chatbot/GraphRAG
+```
+
+### 2. Cài đặt dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Cấu hình
+### 3. Cấu hình môi trường
 
-Tạo file `.env` trong thư mục `graphRAGChatBot/`:
+Tạo file `.env`:
 
 ```env
-# OpenAI API (Recommended)
-OPENAI_API_KEY=sk-proj-your_openai_api_key_here
-
-# Google Gemini API (Alternative)
-GOOGLE_API_KEY=your_google_api_key_here
-
-# Neo4j Configuration
+# Neo4j Database
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_password
 NEO4J_DATABASE=vnptmoney
+
+# LLM Provider: "vllm" hoặc "openai"
+LLM_PROVIDER=vllm
+
+# vLLM Configuration (nếu dùng vLLM)
+VLLM_API_BASE=http://10.144.47.51:8020/v1
+VLLM_MODEL=vnpt-money-dpo
+
+# OpenAI Configuration (nếu dùng OpenAI)
+OPENAI_API_KEY=sk-xxx
 ```
 
-**Lấy OpenAI API Key**: https://platform.openai.com/api-keys (Khuyến nghị)
-**Lấy Google API Key**: https://makersuite.google.com/app/apikey (Alternative)
+### 4. Khởi động Neo4j
 
-### 3. Khởi động Neo4j
-
-**Sử dụng Docker:**
 ```bash
+# Sử dụng Docker
 docker run -d \
   --name neo4j \
   -p 7474:7474 -p 7687:7687 \
@@ -69,69 +83,157 @@ docker run -d \
   neo4j:latest
 ```
 
-**Hoặc cài đặt trực tiếp:**
-Download từ: https://neo4j.com/download/
-
-### 4. Test LLM Extraction
+### 5. Khởi động vLLM Server (nếu dùng self-hosted model)
 
 ```bash
-python test_openai_extraction.py
+python -m vllm.entrypoints.openai.api_server \
+    --model ./training/outputs/final-dpo-qwen25 \
+    --served-model-name vnpt-money-dpo \
+    --port 8020 \
+    --host 0.0.0.0 \
+    --gpu-memory-utilization 0.25 \
+    --max-model-len 2048
 ```
 
-### 5. Build Knowledge Graph
+## Chạy ứng dụng
 
-**Test với 10 documents:**
-```bash
-python neo4j_graph_builder_llm.py --limit 10
-```
-
-**Build toàn bộ (803 documents):**
-```bash
-python neo4j_graph_builder_llm.py
-```
-
-### 6. Visualize Graph
+### Streamlit UI (Recommended)
 
 ```bash
-python visualize_graph_schema.py
+streamlit run app_streamlit.py --server.port 8501
 ```
 
-### 7. Chạy Chatbot
+Truy cập: http://localhost:8501
+
+### Command Line
 
 ```bash
-python main.py
+python chatbot.py
 ```
 
-## 📊 Knowledge Graph Schema
+## Cấu trúc thư mục
+
+```
+GraphRAG/
+├── config.py                    # Cấu hình hệ thống
+├── chatbot.py                   # Chatbot chính
+├── app_streamlit.py             # Giao diện Streamlit
+│
+├── neo4j_connector.py           # Kết nối Neo4j
+├── neo4j_rag_engine.py          # RAG engine với Neo4j
+│
+├── intent_classifier.py         # Phân loại intent
+├── enhanced_entity_extractor.py # Trích xuất entities (hybrid)
+├── llm_entity_extractor.py      # Trích xuất entities (LLM)
+│
+├── focused_answer_extractor.py  # Trả lời đúng trọng tâm
+├── intent_answer_extractor.py   # Trích xuất theo intent
+│
+├── conversation_context_manager.py  # Quản lý context hội thoại
+├── follow_up_detector.py        # Phát hiện câu hỏi follow-up
+├── memory_manager.py            # Mem0 memory manager
+├── step_tracker.py              # Theo dõi các bước hướng dẫn
+│
+└── data/
+    ├── chroma_db/               # Vector store (ChromaDB)
+    └── mem0_chroma/             # Mem0 memory storage
+```
+
+## Cấu hình LLM
+
+### Sử dụng vLLM (Self-hosted) - Recommended
+
+```python
+# config.py hoặc .env
+LLM_PROVIDER = "vllm"
+VLLM_API_BASE = "http://your-server:8020/v1"
+VLLM_MODEL = "vnpt-money-dpo"
+```
+
+**Ưu điểm:**
+- Không tốn phí API
+- Dữ liệu không ra ngoài (on-premise)
+- Model đã finetune cho domain VNPT Money
+
+### Sử dụng OpenAI
+
+```python
+# config.py hoặc .env
+LLM_PROVIDER = "openai"
+LLM_MODEL = "gpt-4o-mini"
+OPENAI_API_KEY = "sk-xxx"
+```
+
+### Chuyển đổi nhanh qua Environment Variable
+
+```bash
+# Dùng vLLM
+export LLM_PROVIDER=vllm
+
+# Dùng OpenAI
+export LLM_PROVIDER=openai
+```
+
+## Knowledge Graph Schema
 
 ### Node Types
 
-- **FAQ**: Câu hỏi + Trả lời
-- **Topic**: Chủ đề (Nạp tiền, Rút tiền, Liên kết ngân hàng)
-- **Section**: Phân loại chủ đề
-- **Service**: Dịch vụ (VNPT Money, VNPT Pay)
-- **Bank**: Ngân hàng (Vietinbank, Vietcombank, BIDV)
-- **Error**: Thông báo lỗi
-- **Action**: Hành động cần thực hiện
-- **Requirement**: Điều kiện yêu cầu
-- **Feature**: Tính năng ứng dụng
-- **TimeFrame**: Khung thời gian
+| Node | Mô tả | Ví dụ |
+|------|-------|-------|
+| `FAQ` | Câu hỏi + Trả lời | "Làm sao để nạp tiền?" |
+| `Topic` | Chủ đề | Nạp tiền, Rút tiền, Chuyển tiền |
+| `Service` | Dịch vụ | VNPT Money, VNPT Pay |
+| `Bank` | Ngân hàng | Vietcombank, BIDV, Techcombank |
+| `Error` | Lỗi/vấn đề | "Thông tin không hợp lệ" |
+| `Feature` | Tính năng | QR code, OTP, Sinh trắc học |
+| `Action` | Hành động UI | "Chọn Nạp tiền", "Nhập OTP" |
+| `Requirement` | Điều kiện | "Có tài khoản ngân hàng" |
+| `TimeFrame` | Thời gian | "2-3 ngày làm việc" |
+| `Case` | Trường hợp xử lý | "Nếu trạng thái Thành công" |
 
 ### Relationship Types
 
-- **ABOUT**: (FAQ) → (Topic)
-- **BELONGS_TO**: (FAQ) → (Section)
-- **MENTIONS_SERVICE**: (FAQ) → (Service)
-- **MENTIONS_BANK**: (FAQ) → (Bank)
-- **DESCRIBES_ERROR**: (FAQ) → (Error)
-- **SUGGESTS_ACTION**: (FAQ) → (Action)
-- **SOLVES**: (FAQ) → (Error)
-- **REQUIRES**: (Action) → (Requirement)
-- **USES_FEATURE**: (Action) → (Feature)
-- **HAS_TIMEFRAME**: (Action) → (TimeFrame)
-- **SIMILAR_TO**: (FAQ) ↔ (FAQ) [với similarity score]
+```
+(FAQ)-[:ABOUT]->(Topic)
+(FAQ)-[:MENTIONS_SERVICE]->(Service)
+(FAQ)-[:MENTIONS_BANK]->(Bank)
+(FAQ)-[:DESCRIBES_ERROR]->(Error)
+(FAQ)-[:SUGGESTS_ACTION]->(Action)
+(FAQ)-[:HAS_CASE]->(Case)
+(FAQ)-[:SIMILAR_TO {score}]->(FAQ)
+```
 
-## 🔍 Query Examples (Neo4j Browser)
+## Intent Types
+
+| Intent | Mô tả | Ví dụ |
+|--------|-------|-------|
+| `FEE` | Hỏi về phí | "Phí chuyển tiền là bao nhiêu?" |
+| `LIMIT` | Hỏi về hạn mức | "Hạn mức chuyển tiền tối đa?" |
+| `TIME` | Hỏi về thời gian | "Bao lâu tiền về tài khoản?" |
+| `HOW_TO` | Hướng dẫn thực hiện | "Làm sao để nạp tiền?" |
+| `TROUBLESHOOT` | Xử lý lỗi/sự cố | "Chuyển tiền thất bại phải làm sao?" |
+| `REQUIREMENT` | Điều kiện/yêu cầu | "Cần gì để liên kết ngân hàng?" |
+| `COMPARISON` | So sánh | "Khác nhau giữa nạp tiền và chuyển khoản?" |
+| `GENERAL` | Câu hỏi chung | "VNPT Money là gì?" |
+
+## API Endpoints (vLLM)
+
+vLLM server expose OpenAI-compatible API:
+
+```bash
+# List models
+curl http://localhost:8020/v1/models
+
+# Chat completion
+curl http://localhost:8020/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "vnpt-money-dpo",
+    "messages": [{"role": "user", "content": "Xin chào"}]
+  }'
+```
+
+## Neo4j Query Examples
 
 ### Tìm FAQs về một topic
 
@@ -160,104 +262,77 @@ ORDER BY r.similarity_score DESC
 LIMIT 10
 ```
 
-### Visualize toàn bộ graph của một FAQ
+## Troubleshooting
 
-```cypher
-MATCH (f:FAQ {id: 'FAQ_0'})
-MATCH (f)-[r]->(e)
-RETURN f, r, e
+### Neo4j connection failed
+
+```bash
+# Kiểm tra Neo4j đang chạy
+curl http://localhost:7474
+
+# Kiểm tra Docker container
+docker ps | grep neo4j
 ```
 
-## 📖 Chi tiết
+### vLLM connection failed
 
-**Quick Start với OpenAI**: [QUICKSTART_OPENAI.md](QUICKSTART_OPENAI.md)
+```bash
+# Kiểm tra vLLM server
+curl http://your-server:8020/v1/models
 
-**Hướng dẫn chi tiết**: [OPENAI_SETUP.md](OPENAI_SETUP.md) để biết:
-- Setup OpenAI API
-- So sánh OpenAI vs Gemini
-- Chi phí và models
-- Troubleshooting
-- Performance optimization
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-Core Components:
-├── config.py                 # Configuration settings
-├── neo4j_connector.py        # Neo4j database interface
-├── llm_entity_extractor.py   # LLM-based extraction
-├── neo4j_graph_builder_llm.py # Graph construction
-└── neo4j_rag_engine.py       # RAG query engine
-
-Application:
-├── chatbot.py                # Chatbot logic
-└── main.py                   # CLI interface
-
-Testing & Utilities:
-├── test_openai_extraction.py # Test OpenAI extraction
-└── visualize_graph_schema.py # Graph visualization
+# Nếu có corporate proxy, code đã set trust_env=False
 ```
 
-### Extending the System
+### OpenAI quota exceeded (429)
 
-**Thêm entity type mới:**
+```bash
+# Chuyển sang vLLM
+export LLM_PROVIDER=vllm
 
-1. Cập nhật prompt trong `llm_entity_extractor.py`
-2. Thêm logic xử lý trong `neo4j_graph_builder_llm.py`
-3. Test với `test_openai_extraction.py`
+# Hoặc nạp thêm credit OpenAI
+```
 
-**Thêm relationship type mới:**
+### Encoding errors (Windows)
 
-1. Cập nhật ĐỊNH NGHĨA CÁC LOẠI MỐI QUAN HỆ trong prompt
-2. Thêm logic tạo relationship trong `_create_relationship_from_extraction`
+```python
+# Thêm vào đầu script
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+```
 
-## 📊 Performance
+## Performance
 
-| Metric | OpenAI (gpt-4o-mini) | Gemini (flash) |
-|--------|---------------------|----------------|
-| Documents | 803 FAQs | 803 FAQs |
-| Build Time | ~30-40 minutes | ~45-60 minutes |
-| LLM API Calls | ~803 requests | ~803 requests |
-| Cost | ~$0.80 | Free (có quota) |
-| Graph Nodes | ~2000-3000 nodes | ~1500-2500 nodes |
-| Relationships | ~5000-7000 edges | ~4000-6000 edges |
-| Quality | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Metric | vLLM (Qwen2.5-DPO) | OpenAI (gpt-4o-mini) |
+|--------|-------------------|---------------------|
+| Response Time | ~2-5s | ~1-3s |
+| Cost | Free (self-hosted) | ~$0.15/1M tokens |
+| Privacy | On-premise | Cloud |
+| Quality | Domain-optimized | General |
 
-**Rate Limiting:**
-- OpenAI Paid Tier: 3,500 requests/minute
-- Google Gemini Free Tier: 60 requests/minute
-- Script tự động thêm delay để tránh rate limiting
+## Files đã update cho vLLM
 
-## 🐛 Troubleshooting
+| File | Thay đổi |
+|------|----------|
+| `config.py` | Thêm VLLM_* configs |
+| `chatbot.py` | `_initialize_vllm()`, `_call_vllm()` |
+| `llm_entity_extractor.py` | vLLM support |
+| `focused_answer_extractor.py` | vLLM support |
+| `follow_up_detector.py` | vLLM support |
+| `intent_answer_extractor.py` | vLLM support |
 
-### "OpenAI API Key not found"
-- Kiểm tra file `.env` có `OPENAI_API_KEY`
-- Verify API key valid tại https://platform.openai.com/api-keys
-
-### "Unable to connect to Neo4j"
-- Kiểm tra Neo4j đang chạy: http://localhost:7474
-- Verify credentials trong `.env`
-- Check firewall settings
-
-### "Insufficient quota" (OpenAI)
-- Thêm payment method tại https://platform.openai.com/account/billing
-- Nạp tối thiểu $5
-
-### Rate Limiting
-- Sử dụng `--limit` để test với ít documents
-- Script tự động sleep 1s mỗi 10 requests
-- OpenAI paid tier có rate limit cao hơn
-
-## 📝 License
+## License
 
 MIT License
 
-## 📧 Support
+## Author
+
+- **GiangNV** - VNPT Media
+- AI Assistant: Claude (Anthropic)
+
+## Support
 
 Nếu gặp vấn đề:
-1. Xem [QUICKSTART_OPENAI.md](QUICKSTART_OPENAI.md) cho hướng dẫn nhanh
-2. Xem [OPENAI_SETUP.md](OPENAI_SETUP.md) cho troubleshooting chi tiết
-3. Kiểm tra logs trong `logs/`
+1. Kiểm tra logs trong terminal
+2. Verify Neo4j connection: http://localhost:7474
+3. Verify vLLM server: `curl http://server:8020/v1/models`
 4. Tạo issue trên GitHub
